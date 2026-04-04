@@ -2,7 +2,8 @@
     "pylint.enabled": true,
     "pylint.args": [
         "--disable=W0105",
-        "--disable=W0611",  
+        "--disable=W0611",
+        "--disable=W0718",  
         "--disable=C0114",  
         "--disable=C0115", 
         "--disable=C0116"
@@ -23,5 +24,8 @@
         "**/*.pyc": true
     },
     "python.analysis.typeCheckingMode": "basic",
-    "python.analysis.autoImportCompletions": true
+    "python.analysis.autoImportCompletions": true,
+    "[json]": {
+        "editor.defaultFormatter": "vscode.json-language-features"
+    }
 }
