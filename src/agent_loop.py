@@ -1,4 +1,5 @@
 from abc import ABC
+from math import e
 import os
 import subprocess
 import json
@@ -20,7 +21,14 @@ client = OpenAI(api_key=api_key, base_url=base_url)
 
 def debug_print_messages(messages):
     print("-" * 40)
-    output = json.dumps(messages, indent=2)
+    # for better readability, trucate long content in messages
+    truncated = []
+    for msg in messages:
+        content = msg["content"]
+        if len(content) > 100:
+            content = content[:100] + "...(truncated)"
+        truncated.append({**msg, "content": content})
+    output = json.dumps(truncated, indent=2)
     print(output)
     print("-" * 40)
 
@@ -184,6 +192,87 @@ class WriteFile(Tool):
         }
 
 
+class Todo(Tool):
+    def __init__(self) -> None:
+        # List of dicts: {"task_id": int, "task_description": str, "task_status": "pending" | "in_progress" | "completed"}
+        self.tasks = []
+
+    def name(self) -> str:
+        return "todo"
+
+    def description(self) -> str:
+        return "Update task list. Track progress on multi-step tasks. Use 'in_progress' status before starting a task, 'pending' when waiting, and 'completed' when done."
+
+    def execute(self, **kwargs) -> str:
+        items = kwargs.get("items", [])
+        print(f"todo(items={items})")
+
+        if (len(items) > 20):
+            raise ValueError("Too many tasks! Please limit to 20")
+        
+        validated = []
+        in_progress_count = 0  # only allow 1 task in progress at a time
+        
+        for i, item in enumerate(items, start=1):
+            id = str(item.get("task_id", str(i)))  # default to index if no id provided
+            description = str(item.get("task_description", "")).strip()
+            status = str(item.get("task_status", "pending")).lower()
+
+            # basic validation
+            if not description:
+                raise ValueError(f"Task {id} has empty description")
+            if status not in ("pending", "in_progress", "completed"):
+                raise ValueError(f"Task {id} has invalid status: {status}")
+            if status == "in_progress":
+                in_progress_count += 1
+                if in_progress_count > 1:
+                    raise ValueError(f"Only one task can be in_progress at a time (task {id})")
+            
+            # if all good, add to validated list
+            validated.append({"task_id": id, "task_description": description, "task_status": status})
+        
+        self.tasks = validated
+        return self.render()
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "task_id": {"type": "string"},
+                                    "task_description": {"type": "string"},
+                                    "task_status": {
+                                        "type": "string",
+                                        "enum": ["pending", "in_progress", "completed"],
+                                    },
+                                },
+                                "required": ["task_id", "task_description", "task_status"],
+                            },
+                        }
+                    },
+                    "required": ["items"],
+                },
+            },
+        }
+
+    def render(self) -> str:
+        if not self.tasks:
+            return "No tasks yet."
+        lines = []
+        for task in self.tasks:
+            # [in_progress] task 1: xxxxx
+            lines.append(f"[{task['task_status']}] task #{task['task_id']}: {task['task_description']}")
+        return "\n".join(lines)
+
 ############################### Agent Main Loop ###############################
 
 
@@ -191,9 +280,13 @@ registry = ToolRegistry()
 registry.register(Bash())
 registry.register(ReadFile())
 registry.register(WriteFile())
+registry.register(Todo())
 
 
 def agent_loop(messages: list):
+
+    # track how many rounds since last todo update, to prevent infinite loops without progress
+    round_since_last_todo = 0
 
     while True:
         # print messages before sending to the model for better debugging
@@ -217,8 +310,10 @@ def agent_loop(messages: list):
             print(message.reasoning_content)
             print("=" * 40)
 
+        used_todo = False
         if response.choices[0].finish_reason == "tool_calls":
             tool_calls = response.choices[0].message.tool_calls
+
             for call in tool_calls:
                 # we only have one tool, so we can directly check the name
                 if call.function.name in registry.list_tools():
@@ -250,12 +345,26 @@ def agent_loop(messages: list):
                             "content": output,
                         }
                     )
+
+                if call.function.name == "todo":
+                    used_todo = True
         elif response.choices[0].finish_reason == "stop":
             print("Final response:", response.choices[0].message.content)
             return response.choices[0].message.content
         else:
             print(f"Unexpected finish reason: {response.choices[0].finish_reason}")
             return f"Unexpected finish reason: {response.choices[0].finish_reason}"
+
+        # update round_since_last_todo counter
+        round_since_last_todo = 0 if used_todo else round_since_last_todo + 1
+        # inject a todo reminder to prevent infinite loops without progress
+        if round_since_last_todo > 3:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Reminder: Please use the `todo` tool to plan and track your progress on multi-step tasks. This helps ensure steady progress and prevents infinite loops.",
+                }
+            )
 
 
 if __name__ == "__main__":
@@ -269,15 +378,15 @@ if __name__ == "__main__":
     # print(safe_path("hello.py"))
     # print(safe_path("../hello.py"))  # This should raise an error
 
-    history = [
-        {
-            "role": "system",
-            "content": f"You are a coding agent at {os.getcwd()}. Use available and appropriate tool to solve tasks. Act, don't explain.",
-        }
-    ]
+    system_prompt = f"You are a coding agent at {WORKDIR}. \
+Use available and appropriate tools to solve tasks. \
+For complex tasks, use `todo` tool to plan multi-step sub-tasks. Mark in_progress before starting, completed when done. \
+Prefer tools over prose."
+
+    history = [{"role": "system", "content": system_prompt}]
     while True:
         try:
-            query = input("\033[36ms02 >> \033[0m")
+            query = input("\033[36mNanoCode >> \033[0m")
         except (EOFError, KeyboardInterrupt):
             break
         if query.strip().lower() in ("q", "exit", ""):
@@ -285,5 +394,5 @@ if __name__ == "__main__":
         history.append({"role": "user", "content": query})
         agent_loop(history)
         response_content = history[-1]["content"]
-        print(f"\033[32ms02 << {response_content}\033[0m")
+        print(f"\033[32mNanoCode << {response_content}\033[0m")
         print()
