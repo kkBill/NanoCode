@@ -1,4 +1,5 @@
 from abc import ABC
+from hmac import new
 from math import e
 import os
 import subprocess
@@ -27,7 +28,21 @@ def debug_print_messages(messages):
         content = msg["content"]
         if len(content) > 100:
             content = content[:100] + "...(truncated)"
-        truncated.append({**msg, "content": content})
+        if "tool_calls" in msg:
+            tool_calls_truncated = []
+            for call in msg["tool_calls"]:
+                call_truncated = {**call}
+                if "arguments" in call["function"]:
+                    args = call["function"]["arguments"]
+                    if len(args) > 200:
+                        call_truncated["function"]["arguments"] = args[:200] + "...(truncated)"
+                tool_calls_truncated.append(call_truncated)
+        
+        new_msg = {**msg, "content": content}
+        if "tool_calls" in msg:
+            new_msg = {**msg, "content": content, "tool_calls": tool_calls_truncated}
+
+        truncated.append(new_msg)
     output = json.dumps(truncated, indent=2)
     print(output)
     print("-" * 40)
@@ -73,9 +88,15 @@ class ToolRegistry:
     def get_all_schemas(self):
         return [tool.schema() for _, tool in self.tools.items()]
 
+    def get_schemas_for_subagent(self):
+        # sub-agent doesn't need `sub_agent` tool to avoid infinite recursion, but can use all other tools
+        return [tool.schema() for name, tool in self.tools.items() if name != "sub_agent"]
+
     def list_tools(self):
         return list(self.tools.keys())
 
+    def list_tools_for_subagent(self):
+        return [name for name in self.tools.keys() if name != "sub_agent"]
 
 class Bash(Tool):
     def name(self) -> str:
@@ -273,6 +294,102 @@ class Todo(Tool):
             lines.append(f"[{task['task_status']}] task #{task['task_id']}: {task['task_description']}")
         return "\n".join(lines)
 
+
+class SubAgent(Tool):
+    def name(self) -> str:
+        return "sub_agent"
+
+    def description(self) -> str:
+        return "Spawn a subagent with fresh context to solve a given task. It shares the filesystem but not conversation history."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string"},
+                    },
+                    "required": ["task"],
+                },
+            },
+        }
+    
+    def execute(self, **kwargs) -> str:
+        task = kwargs.get("task", "")
+        print(f"sub_agent(task={task})")
+
+        if not task:
+            return "No task provided for sub-agent."
+        
+        system_prompt = f"You are a coding sub-agent at {WORKDIR}. Complete a given task and return concise summary. Use available tools to solve it. Prefer tools over prose."
+        history = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": task}
+        ]
+
+        # sub-agent loop with limited rounds to prevent infinite recursion
+        for _ in range(5):
+            response = client.chat.completions.create(
+                model="kimi-k2.5",
+                messages=history,
+                tools=registry.get_schemas_for_subagent(),
+                max_tokens=4096,
+                temperature=0.7,
+                extra_body={"enable_thinking": True},
+            )
+
+            message = response.choices[0].message
+
+            if hasattr(message, "reasoning_content") and message.reasoning_content:
+                print("=" * 40)
+                print("🤔 sub-agent reasoning content:")
+                print(message.reasoning_content)
+                print("=" * 40)
+
+            if response.choices[0].finish_reason == "tool_calls":
+                tool_calls = response.choices[0].message.tool_calls
+
+                for call in tool_calls:
+                    if call.function.name in registry.list_tools_for_subagent():
+                        args = json.loads(call.function.arguments)
+                        output = registry.get_tool(call.function.name).execute(**args)
+                        history.append(
+                            {
+                                "role": "assistant",
+                                "content": message.content,
+                                "tool_calls": [
+                                    {
+                                        "id": call.id,
+                                        "type": "function",
+                                        "function": {
+                                            "name": call.function.name,
+                                            "arguments": call.function.arguments,
+                                        },
+                                    }
+                                ],
+                            }
+                        )
+                        history.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": call.id,
+                                "tool_name": call.function.name,
+                                "content": output,
+                            }
+                        )
+            elif response.choices[0].finish_reason == "stop":
+                break
+            else:
+                print(f"Unexpected finish reason in sub-agent: {response.choices[0].finish_reason}")
+                break
+
+        # only return the final response
+        return response.choices[0].message.content.strip() if response.choices[0].message.content else "Sub-agent finished without response."
+
 ############################### Agent Main Loop ###############################
 
 
@@ -281,6 +398,7 @@ registry.register(Bash())
 registry.register(ReadFile())
 registry.register(WriteFile())
 registry.register(Todo())
+registry.register(SubAgent())
 
 
 def agent_loop(messages: list):
@@ -381,6 +499,7 @@ if __name__ == "__main__":
     system_prompt = f"You are a coding agent at {WORKDIR}. \
 Use available and appropriate tools to solve tasks. \
 For complex tasks, use `todo` tool to plan multi-step sub-tasks. Mark in_progress before starting, completed when done. \
+Use the `sub_agent` tool to delegate exploration or subtasks. \
 Prefer tools over prose."
 
     history = [{"role": "system", "content": system_prompt}]
