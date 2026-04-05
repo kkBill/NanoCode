@@ -1,6 +1,6 @@
 from abc import ABC
-from hmac import new
-from math import e
+import re
+import yaml
 import os
 import subprocess
 import json
@@ -26,7 +26,7 @@ def debug_print_messages(messages):
     truncated = []
     for msg in messages:
         content = msg["content"]
-        if len(content) > 100:
+        if len(content) > 200:
             content = content[:100] + "...(truncated)"
         if "tool_calls" in msg:
             tool_calls_truncated = []
@@ -35,9 +35,11 @@ def debug_print_messages(messages):
                 if "arguments" in call["function"]:
                     args = call["function"]["arguments"]
                     if len(args) > 200:
-                        call_truncated["function"]["arguments"] = args[:200] + "...(truncated)"
+                        call_truncated["function"]["arguments"] = (
+                            args[:200] + "...(truncated)"
+                        )
                 tool_calls_truncated.append(call_truncated)
-        
+
         new_msg = {**msg, "content": content}
         if "tool_calls" in msg:
             new_msg = {**msg, "content": content, "tool_calls": tool_calls_truncated}
@@ -56,6 +58,75 @@ def safe_path(p: str) -> Path:
         raise ValueError(f"Path escapes workspace: {p}")
 
     return path
+
+
+############################### Skill ###############################
+
+
+class SkillLoader:
+    def __init__(self, skill_dir: Path):
+        self.skill_dir = skill_dir
+
+    # load skill by name
+    def load_skill(self, name: str) -> str | None:
+        # 1. check if skill file exists
+        skill_path = self.skill_dir / f"{name}/SKILL.md"
+        if not skill_path.exists():
+            return None
+        # 2. if exists, read and return content (instructions for the skill)
+        return skill_path.read_text(encoding="utf-8")
+
+    def load_instructions(self, name: str) -> str:
+        content = self.load_skill(name)
+        if not content:
+            return f"Skill {name} not found."
+
+        # 提取元数据块之外的内容作为指令文本
+        pattern = r"^---\n(.*?)\n---\n?(.*)$"
+        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
+
+        if not match:
+            return content.strip()  # 如果没有元数据块，返回整个内容
+
+        instructions = match.group(2).strip()
+        return instructions
+
+    def load_metadata(self, name: str) -> dict:
+        content = self.load_skill(name)
+        if not content:
+            return {}
+
+        # 匹配文件开头的 --- ... --- 元数据块
+        pattern = r"^---\n(.*?)\n---"
+        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
+
+        if not match:
+            return {}
+
+        # 提取元数据文本并 YAML 解析（最优雅）
+        metadata_text = match.group(1)
+        metadata = yaml.safe_load(metadata_text)
+
+        return metadata
+
+    # list all available skills (skill name + description)
+    def list_skills(self) -> str:
+        # 1. scan skill_dir for subdirectories, each subdirectory is a skill
+        skills = []
+        for item in self.skill_dir.iterdir():
+            if not item.is_dir():
+                continue
+            # 2. check if SKILL.md exists in the subdirectory
+            skill_file = item / "SKILL.md"
+            if not skill_file.exists():
+                continue
+
+            name = item.name
+            metadata = self.load_metadata(name)
+            description = metadata.get("description", "No description available.")
+            skills.append(f"{name}: {description}")
+
+        return "\n".join(skills)
 
 
 ############################### Tools Definition ###############################
@@ -90,13 +161,16 @@ class ToolRegistry:
 
     def get_schemas_for_subagent(self):
         # sub-agent doesn't need `sub_agent` tool to avoid infinite recursion, but can use all other tools
-        return [tool.schema() for name, tool in self.tools.items() if name != "sub_agent"]
+        return [
+            tool.schema() for name, tool in self.tools.items() if name != "sub_agent"
+        ]
 
     def list_tools(self):
         return list(self.tools.keys())
 
     def list_tools_for_subagent(self):
         return [name for name in self.tools.keys() if name != "sub_agent"]
+
 
 class Bash(Tool):
     def name(self) -> str:
@@ -228,12 +302,12 @@ class Todo(Tool):
         items = kwargs.get("items", [])
         print(f"todo(items={items})")
 
-        if (len(items) > 20):
+        if len(items) > 20:
             raise ValueError("Too many tasks! Please limit to 20")
-        
+
         validated = []
         in_progress_count = 0  # only allow 1 task in progress at a time
-        
+
         for i, item in enumerate(items, start=1):
             id = str(item.get("task_id", str(i)))  # default to index if no id provided
             description = str(item.get("task_description", "")).strip()
@@ -247,11 +321,15 @@ class Todo(Tool):
             if status == "in_progress":
                 in_progress_count += 1
                 if in_progress_count > 1:
-                    raise ValueError(f"Only one task can be in_progress at a time (task {id})")
-            
+                    raise ValueError(
+                        f"Only one task can be in_progress at a time (task {id})"
+                    )
+
             # if all good, add to validated list
-            validated.append({"task_id": id, "task_description": description, "task_status": status})
-        
+            validated.append(
+                {"task_id": id, "task_description": description, "task_status": status}
+            )
+
         self.tasks = validated
         return self.render()
 
@@ -276,7 +354,11 @@ class Todo(Tool):
                                         "enum": ["pending", "in_progress", "completed"],
                                     },
                                 },
-                                "required": ["task_id", "task_description", "task_status"],
+                                "required": [
+                                    "task_id",
+                                    "task_description",
+                                    "task_status",
+                                ],
                             },
                         }
                     },
@@ -291,7 +373,9 @@ class Todo(Tool):
         lines = []
         for task in self.tasks:
             # [in_progress] task 1: xxxxx
-            lines.append(f"[{task['task_status']}] task #{task['task_id']}: {task['task_description']}")
+            lines.append(
+                f"[{task['task_status']}] task #{task['task_id']}: {task['task_description']}"
+            )
         return "\n".join(lines)
 
 
@@ -317,18 +401,18 @@ class SubAgent(Tool):
                 },
             },
         }
-    
+
     def execute(self, **kwargs) -> str:
         task = kwargs.get("task", "")
         print(f"sub_agent(task={task})")
 
         if not task:
             return "No task provided for sub-agent."
-        
+
         system_prompt = f"You are a coding sub-agent at {WORKDIR}. Complete a given task and return concise summary. Use available tools to solve it. Prefer tools over prose."
         history = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": task}
+            {"role": "user", "content": task},
         ]
 
         # sub-agent loop with limited rounds to prevent infinite recursion
@@ -384,11 +468,51 @@ class SubAgent(Tool):
             elif response.choices[0].finish_reason == "stop":
                 break
             else:
-                print(f"Unexpected finish reason in sub-agent: {response.choices[0].finish_reason}")
+                print(
+                    f"Unexpected finish reason in sub-agent: {response.choices[0].finish_reason}"
+                )
                 break
 
         # only return the final response
-        return response.choices[0].message.content.strip() if response.choices[0].message.content else "Sub-agent finished without response."
+        return (
+            response.choices[0].message.content.strip()
+            if response.choices[0].message.content
+            else "Sub-agent finished without response."
+        )
+
+
+class LoadSkill(Tool):
+    def name(self) -> str:
+        return "load_skill"
+
+    def description(self) -> str:
+        return "Load instructions for a skill by name. Use it when you need to use a skill but don't know how."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "skill_name": {"type": "string"},
+                    },
+                    "required": ["skill_name"],
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        skill_name = kwargs.get("skill_name", "")
+        print(f"load_skill(name={skill_name})")
+
+        if not skill_name:
+            return "No skill name provided."
+
+        instructions = skill_loader.load_instructions(skill_name)
+        return instructions
 
 ############################### Agent Main Loop ###############################
 
@@ -399,6 +523,7 @@ registry.register(ReadFile())
 registry.register(WriteFile())
 registry.register(Todo())
 registry.register(SubAgent())
+registry.register(LoadSkill())
 
 
 def agent_loop(messages: list):
@@ -496,11 +621,14 @@ if __name__ == "__main__":
     # print(safe_path("hello.py"))
     # print(safe_path("../hello.py"))  # This should raise an error
 
+    skill_loader = SkillLoader(Path(__file__).parent.parent.resolve() / "skills")
+
     system_prompt = f"You are a coding agent at {WORKDIR}. \
-Use available and appropriate tools to solve tasks. \
-For complex tasks, use `todo` tool to plan multi-step sub-tasks. Mark in_progress before starting, completed when done. \
-Use the `sub_agent` tool to delegate exploration or subtasks. \
-Prefer tools over prose."
+    Use available and appropriate tools or skills to solve tasks. \
+    For complex tasks, use the `todo` tool to plan multi-step sub-tasks. Mark in_progress before starting, completed when done. \
+    Use the `sub_agent` tool to delegate exploration or subtasks. \
+    Use the `load_skill` tool to load instructions for a skill when needed.\n \
+    Available skills:\n {skill_loader.list_skills()}."
 
     history = [{"role": "system", "content": system_prompt}]
     while True:
@@ -515,3 +643,13 @@ Prefer tools over prose."
         response_content = history[-1]["content"]
         print(f"\033[32mNanoCode << {response_content}\033[0m")
         print()
+
+    # simple test for skill loader
+    # skill_loader = SkillLoader(Path(__file__).parent.parent.resolve() / "skills")
+    # print("Available skills:")
+    # print(skill_loader.list_skills())
+    # print()
+    # name = "memory"
+    # print(f"Instructions for skill '{name}':")
+    # print(skill_loader.load_instructions(name))
+    # print()
