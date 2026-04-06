@@ -1,5 +1,8 @@
 from abc import ABC
+import threading
 import re
+from turtle import back
+import uuid
 import yaml
 import os
 import subprocess
@@ -232,6 +235,80 @@ class TaskManager:
 
 task_dir = WORKDIR / ".tasks"
 task_manager = TaskManager(task_dir=task_dir)
+
+
+############################### Background Task Manager ###############################
+
+class BackgroundManager:
+ 
+    def __init__(self) -> None:
+        # task_id -> {"command": str, "status": "running" | "success" | "timeout" | "error", "result": str}
+        self._tasks: dict[str, dict] = {}
+        # list of completed tasks: {"task_id": str, "command": str, "status": str, "result": str}
+        self._result_queue: list[dict] = []
+        # lock for thread-safe access to _result_queue
+        self._lock = threading.Lock()
+
+    def run(self, command: str) -> str:
+        """run a task in the background and return task id immediately"""
+        task_id = uuid.uuid4().hex
+        self._tasks[task_id] = {"command": command, "status": "running", "result": None}
+        # start a new daemon thread to execute the task
+        thread = threading.Thread(target=self._execute, args=(task_id,), daemon=True)
+        thread.start()
+        return task_id
+
+    def _execute(self, task_id: str):
+        """execute the command for a given task id, update the task status and result when done"""
+        command = self._tasks[task_id]["command"]
+        try:
+            r = subprocess.run(
+                command,
+                shell=True,
+                cwd=WORKDIR,
+                capture_output=True,
+                text=True,
+                timeout=300,
+                check=False,
+            )
+            result = (r.stdout + r.stderr).strip()[:50000] if (r.stdout or r.stderr) else "(no output)"
+            status = "success" if r.returncode == 0 else f"error (code {r.returncode})"
+        except subprocess.TimeoutExpired:
+            result = "Error: Timeout (300s)"
+            status = "timeout"
+        except Exception as e:
+            result = f"Error: {str(e)}"
+            status = f"error ({str(e)})"
+
+        self._tasks[task_id]["status"] = status
+        self._tasks[task_id]["result"] = result
+        
+        with self._lock:    
+            self._result_queue.append({"task_id": task_id, "command": command, "status": status, "result": result})
+
+    def check_status(self, task_id: str | None) -> str:
+        # check the status of a specific task or all tasks if task_id is None
+        if task_id:
+            task = self._tasks.get(task_id, None)
+            if not task:
+                return f"Task {task_id} not found"
+            return f"Task: {task_id}, command: {task['command']}, status: {task['status']}"
+        else:
+            lines = []
+            for id, task in self._tasks.items():
+                lines.append(f"Task: {id}, command: {task['command']}, status: {task['status']}")
+            return "\n".join(lines)
+ 
+    def get_result(self) -> list[dict]:
+        """get and clear the result queue of completed tasks"""
+        with self._lock:
+            result = self._result_queue.copy()
+            self._result_queue.clear()
+        return result
+
+
+background_manager = BackgroundManager()
+
 
 ############################### Tools Definition ###############################
 
@@ -769,6 +846,71 @@ class ListTasks(Tool):
         tasks = task_manager.list_tasks()
         return tasks
 
+
+class RunBackgroundTask(Tool):
+    def name(self) -> str:
+        return "run_background_task"
+
+    def description(self) -> str:
+        return "Run a long-running task in the background. Return a task id immediately, and the result will be available later via check_background_task."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                    },
+                    "required": ["command"],
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        command = kwargs.get("command", "")
+        print(f"run_background_task(command={command})")
+
+        if not command:
+            return "No command provided for background task."
+
+        task_id = background_manager.run(command)
+        return f"Background task started with id: {task_id}"
+
+
+class CheckBackgroundTask(Tool):
+    def name(self) -> str:
+        return "check_background_task"
+
+    def description(self) -> str:
+        return "Check the status of a background task by id, or list all background tasks if no id provided."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "string"},
+                    },
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        task_id = kwargs.get("task_id", None)
+        print(f"check_background_task(task_id={task_id})")
+
+        status = background_manager.check_status(task_id)
+        return status
+
+
 ############################### Agent Main Loop ###############################
 
 
@@ -783,6 +925,8 @@ registry.register(CreateTask())
 registry.register(UpdateTask())
 registry.register(GetTask())
 registry.register(ListTasks())
+registry.register(RunBackgroundTask())
+registry.register(CheckBackgroundTask())
 
 
 def agent_loop(messages: list):
@@ -793,6 +937,14 @@ def agent_loop(messages: list):
     while True:
         # print messages before sending to the model for better debugging
         debug_print_messages(messages)
+
+        # get all result from background tasks and append to messages for context
+        background_results = [f"Task {r['task_id']} finished with status {r['status']}. Command: {r['command']}. Result: {r['result']}" for r in background_manager.get_result()]
+        results_content = "\n".join(background_results)
+        if results_content:
+            messages.append({"role": "user", "content": results_content})
+            # add an assistant message to make it clear in the conversation history, so the model can refer to it later if needed
+            messages.append({"role": "assistant", "content": "Noted background results."})
 
         response = client.chat.completions.create(
             model="kimi-k2.5",
@@ -860,13 +1012,13 @@ def agent_loop(messages: list):
         # update round_since_last_todo counter
         round_since_last_todo = 0 if used_todo else round_since_last_todo + 1
         # inject a todo reminder to prevent infinite loops without progress
-        if round_since_last_todo > 3:
-            messages.append(
-                {
-                    "role": "user",
-                    "content": "Reminder: Please use the `todo` tool to plan and track your progress on multi-step tasks. This helps ensure steady progress and prevents infinite loops.",
-                }
-            )
+        # if round_since_last_todo > 3:
+        #     messages.append(
+        #         {
+        #             "role": "user",
+        #             "content": "Reminder: Please use the `todo` tool to plan and track your progress on multi-step tasks. This helps ensure steady progress and prevents infinite loops.",
+        #         }
+        #     )
 
 
 if __name__ == "__main__":
@@ -891,7 +1043,8 @@ if __name__ == "__main__":
 
     system_prompt = f" You are a coding agent at {WORKDIR}.\n \
 Use available and appropriate tools or skills to solve tasks. \n \
-For complex tasks, use the task tool to plan and track your progress."
+For complex tasks, use the task tool to plan and track your progress. \n \
+Use background_run for long-running commands."
 
     history = [{"role": "system", "content": system_prompt}]
     while True:
