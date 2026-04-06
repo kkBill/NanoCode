@@ -1,7 +1,6 @@
 from abc import ABC
 import threading
 import re
-from turtle import back
 import uuid
 import yaml
 import os
@@ -309,6 +308,65 @@ class BackgroundManager:
 
 background_manager = BackgroundManager()
 
+
+############################### Context Manager ###############################
+class ContextManager:
+    def __init__(self, token_threshold: int = 1024, keep_recent_rounds: int = 1):
+        self.token_threshold = token_threshold
+        self.keep_recent_rounds = keep_recent_rounds
+
+    def compact_tool_calls(self, messages: list) -> list:
+        """compact tool call result, do it every time before sending messages to the model"""
+        if len(messages) <= self.keep_recent_rounds * 2:
+            return messages
+        
+        old_messages = messages[:-(self.keep_recent_rounds * 2)]
+        compacted = []
+        for msg in old_messages:
+            if msg.get("role") == "system" or msg.get("role") == "user":
+                compacted.append(msg)
+            elif msg.get("role") == "assistant" and "tool_calls" not in msg:
+                compacted.append(msg)
+            elif msg.get("role") == "tool":
+                # for tool messages, only keep the tool name
+                compacted.append({"role": "assistant", "content": f"Tool {msg.get('tool_name', 'unknown')} used"})
+        recent_messages = messages[-(self.keep_recent_rounds * 2):]
+        return compacted + recent_messages
+
+    def compact(self, messages: list) -> list:
+        """automatically compact messages when token count exceeds threshold, can be called at the end of each round"""
+        if self._token_estimate(messages) <= self.token_threshold:
+            return messages
+        
+        print("Token count exceeds threshold, compacting messages...")
+        # keep recent `keep_recent_rounds` rounds of messages, and summarize the older messages
+        old_messages = messages[:-(self.keep_recent_rounds * 2)]  # each round has 2 messages (user + assistant)
+        context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in old_messages])
+        
+        response = client.chat.completions.create(
+            model="kimi-k2.5",
+            messages=[
+                {"role": "system", "content": "You are a helpful context manager. Summarize the following conversation history in a concise way, keeping important details and omitting trivial parts."}, 
+                {"role": "user", "content": context},
+            ],
+            max_tokens=1024,
+            temperature=0.5,
+        )
+        summary = response.choices[0].message.content.strip()
+        
+        # return the compacted messages with summary of old messages + recent messages
+        pre_messages = [
+            {"role": "user", "content": f"Summary of previous conversation: {summary}"},
+            {"role": "assistant", "content": "Understood. I have the context from the summary. Continuing."},
+        ]
+        return pre_messages + messages[-(self.keep_recent_rounds * 2):]
+    
+    def _token_estimate(self, messages: list) -> int:
+        """estimate token count of messages, use 1 token per 4 characters as a rough estimate"""
+        return len(str(messages)) // 4
+
+
+context_manager = ContextManager()
 
 ############################### Tools Definition ###############################
 
@@ -935,8 +993,6 @@ def agent_loop(messages: list):
     round_since_last_todo = 0
 
     while True:
-        # print messages before sending to the model for better debugging
-        debug_print_messages(messages)
 
         # get all result from background tasks and append to messages for context
         background_results = [f"Task {r['task_id']} finished with status {r['status']}. Command: {r['command']}. Result: {r['result']}" for r in background_manager.get_result()]
@@ -945,6 +1001,12 @@ def agent_loop(messages: list):
             messages.append({"role": "user", "content": results_content})
             # add an assistant message to make it clear in the conversation history, so the model can refer to it later if needed
             messages.append({"role": "assistant", "content": "Noted background results."})
+
+        messages = context_manager.compact_tool_calls(messages)
+        messages = context_manager.compact(messages)
+
+        # print messages before sending to the model for better debugging
+        debug_print_messages(messages)
 
         response = client.chat.completions.create(
             model="kimi-k2.5",
