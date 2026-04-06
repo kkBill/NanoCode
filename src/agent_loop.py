@@ -124,10 +124,114 @@ class SkillLoader:
             name = item.name
             metadata = self.load_metadata(name)
             description = metadata.get("description", "No description available.")
-            skills.append(f"{name}: {description}")
+            skills.append(f" - {name}: {description}")
 
         return "\n".join(skills)
 
+
+############################### Task Manager ###############################
+
+#  graph-based task manager to track multiple tasks and their dependencies
+#  each task is a JSON file in the task_dir, with fields: id, description, status (pending/in_progress/completed), blockBy (list of task ids), blocks (list of task ids)
+class TaskManager:
+    def __init__(self, task_dir: Path):
+        self.dir = task_dir
+        self.dir.mkdir(exist_ok=True)
+        self._next_id = self._max_id() + 1
+
+    # create a new task with description, return the task JSON
+    def create_task(self, description: str) -> str:
+        task = {"id": str(self._next_id), "description": description, "status": "pending", "blockedBy": [], "blocks": []}
+        self._next_id += 1
+        path = self.dir / f"task_{task['id']}.json"
+        task_json = json.dumps(task, indent=2)
+        path.write_text(task_json, encoding="utf-8")
+        return task_json
+
+    # update task status and dependencies
+    def update_task(self, task_id: int, status: str, add_blocked_by: list[int] = None, add_blocks: list[int] = None) -> str:
+        # load task and make sure it exists
+        path = self.dir / f"task_{task_id}.json"
+        if not path.exists():
+            raise ValueError(f"Task {task_id} not found")
+        task = json.loads(path.read_text(encoding="utf-8"))
+
+        # update status
+        if status:
+            if status not in ("pending", "in_progress", "completed"):
+                raise ValueError(f"Invalid status: {status}")
+            task["status"] = status
+            if status == "completed":
+                # check if all prerequisites are completed
+                for prereq_id in task["blockedBy"]:
+                    prereq_path = self.dir / f"task_{prereq_id}.json"
+                    if not prereq_path.exists():
+                        raise ValueError(f"Prerequisite task {prereq_id} not found")
+                    prereq_task = json.loads(prereq_path.read_text(encoding="utf-8"))
+                    if prereq_task["status"] != "completed":
+                        raise ValueError(f"Cannot complete task {task_id} because prerequisite task {prereq_id} is not completed")
+                
+                # if completed, clear all blocks-task by this task
+                self._clear_blocks(task_id)
+        
+        # update dependencies
+        if add_blocked_by is not None:
+            task["blockedBy"] = list(set(task["blockedBy"] + add_blocked_by))
+        
+        # update task which is blocked by this task to maintain consistency
+        if add_blocks is not None:
+            task["blocks"] = list(set(task["blocks"] + add_blocks))
+            for block_id in add_blocks:
+                blocked_path = self.dir / f"task_{block_id}.json"
+                if blocked_path.exists():
+                    blocked_task = json.loads(blocked_path.read_text(encoding="utf-8"))
+                    blocked_task["blockedBy"] = list(set(blocked_task["blockedBy"] + [task_id]))
+                    blocked_path.write_text(json.dumps(blocked_task, indent=2), encoding="utf-8")
+
+        # save updated task
+        path.write_text(json.dumps(task, indent=2), encoding="utf-8")
+        return json.dumps(task, indent=2)
+
+    def get_task(self, task_id: int) -> str:
+        path = self.dir / f"task_{task_id}.json"
+        if not path.exists():
+            raise ValueError(f"Task {task_id} not found")
+        return path.read_text(encoding="utf-8")
+
+    def list_tasks(self) -> str:
+        tasks = []
+        for path in self.dir.glob("task_*.json"):
+            task = json.loads(path.read_text(encoding="utf-8"))
+            tasks.append(task)
+        return json.dumps(tasks, indent=2)
+
+    def _clear_blocks(self, task_id: int):
+        # clear blocks for a completed task
+        path = self.dir / f"task_{task_id}.json"
+        if not path.exists():
+            raise ValueError(f"Task {task_id} not found")
+        task = json.loads(path.read_text(encoding="utf-8"))
+        for blocked_id in task["blocks"]:
+            blocked_path = self.dir / f"task_{blocked_id}.json"
+            if blocked_path.exists():
+                blocked_task = json.loads(blocked_path.read_text(encoding="utf-8"))
+                blocked_task["blockedBy"] = [id for id in blocked_task["blockedBy"] if id != task_id]
+                blocked_path.write_text(json.dumps(blocked_task, indent=2), encoding="utf-8")
+
+    def _max_id(self) -> int:
+        max_id = -1
+        for path in self.dir.glob("task_*.json"):
+            try:
+                id = int(path.stem.split("_")[1])
+                if id > max_id:
+                    max_id = id
+            except:
+                continue
+        return max_id + 1
+
+
+task_dir = WORKDIR / ".tasks"
+task_manager = TaskManager(task_dir=task_dir)
 
 ############################### Tools Definition ###############################
 
@@ -514,6 +618,157 @@ class LoadSkill(Tool):
         instructions = skill_loader.load_instructions(skill_name)
         return instructions
 
+
+class CreateTask(Tool):
+    def name(self) -> str:
+        return "create_task"
+
+    def description(self) -> str:
+        return "Create a new task with description. Return the created task with id."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "description": {"type": "string"},
+                    },
+                    "required": ["description"],
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        description = kwargs.get("description", "")
+        print(f"create_task(description={description})")
+
+        if not description:
+            return "No task description provided."
+
+        task = task_manager.create_task(description)
+        return task
+
+
+class UpdateTask(Tool):
+    def name(self) -> str:
+        return "update_task"
+
+    def description(self) -> str:
+        return "Update a task's status and dependencies. Return the updated task."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "integer"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed"],
+                        },
+                        "add_blocked_by": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "List of task ids that block this task."
+                        },
+                        "add_blocks": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "List of task ids that this task blocks."
+                        },
+                    },
+                    "required": ["task_id", "status"],
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        task_id = kwargs.get("task_id", None)
+        status = kwargs.get("status", "")
+        add_blocked_by = kwargs.get("add_blocked_by", [])
+        add_blocks = kwargs.get("add_blocks", [])
+        print(f"update_task(id={task_id}, status={status}, add_blocked_by={add_blocked_by}, add_blocks={add_blocks})")
+
+        if not task_id:
+            return "No task id provided."
+
+        try:
+            updated_task = task_manager.update_task(task_id, status, add_blocked_by, add_blocks)
+            return updated_task
+        except Exception as e:
+            return f"Error: {str(e)}"
+        
+
+class GetTask(Tool):
+    def name(self) -> str:
+        return "get_task"
+
+    def description(self) -> str:
+        return "Get a task's details by id."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_id": {"type": "integer"},
+                    },
+                    "required": ["task_id"],
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        task_id = kwargs.get("task_id", None)
+        print(f"get_task(id={task_id})")
+
+        if not task_id:
+            return "No task id provided."
+
+        try:
+            task = task_manager.get_task(task_id)
+            return task
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+
+class ListTasks(Tool):
+    def name(self) -> str:
+        return "list_tasks"
+
+    def description(self) -> str:
+        return "List all tasks with their details."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        print("list_tasks()")
+        tasks = task_manager.list_tasks()
+        return tasks
+
 ############################### Agent Main Loop ###############################
 
 
@@ -521,9 +776,13 @@ registry = ToolRegistry()
 registry.register(Bash())
 registry.register(ReadFile())
 registry.register(WriteFile())
-registry.register(Todo())
+# registry.register(Todo())
 registry.register(SubAgent())
 registry.register(LoadSkill())
+registry.register(CreateTask())
+registry.register(UpdateTask())
+registry.register(GetTask())
+registry.register(ListTasks())
 
 
 def agent_loop(messages: list):
@@ -623,12 +882,16 @@ if __name__ == "__main__":
 
     skill_loader = SkillLoader(Path(__file__).parent.parent.resolve() / "skills")
 
-    system_prompt = f"You are a coding agent at {WORKDIR}. \
-    Use available and appropriate tools or skills to solve tasks. \
-    For complex tasks, use the `todo` tool to plan multi-step sub-tasks. Mark in_progress before starting, completed when done. \
-    Use the `sub_agent` tool to delegate exploration or subtasks. \
-    Use the `load_skill` tool to load instructions for a skill when needed.\n \
-    Available skills:\n {skill_loader.list_skills()}."
+#     system_prompt = f" You are a coding agent at {WORKDIR}.\n \
+# Use available and appropriate tools or skills to solve tasks. \n \
+# - For complex tasks, use the `todo` tool to plan multi-step sub-tasks. Mark in_progress before starting, completed when done. \n \
+# - Use the `sub_agent` tool to delegate exploration or subtasks. \n \
+# - Use the `load_skill` tool to load instructions for a skill when needed.\n\n \
+# Available skills:\n{skill_loader.list_skills()}\n"
+
+    system_prompt = f" You are a coding agent at {WORKDIR}.\n \
+Use available and appropriate tools or skills to solve tasks. \n \
+For complex tasks, use the task tool to plan and track your progress."
 
     history = [{"role": "system", "content": system_prompt}]
     while True:
