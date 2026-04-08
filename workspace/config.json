@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "before_tool_call": [
+      {"command": "echo $HOOK_EVENT: $HOOK_TOOL_NAME >&2; exit 0"}
+    ]
+  }
+}
