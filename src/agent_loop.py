@@ -1,8 +1,10 @@
 from abc import ABC
+from dataclasses import dataclass
 import threading
 import re
 import uuid
 import yaml
+from fnmatch import fnmatch
 import os
 import subprocess
 import json
@@ -24,30 +26,58 @@ client = OpenAI(api_key=api_key, base_url=base_url)
 
 def debug_print_messages(messages):
     print("-" * 40)
-    # for better readability, trucate long content in messages
+    """
+    # for better readability, truncate long content in messages
     truncated = []
     for msg in messages:
-        content = msg["content"]
+        # Handle both dict and ChatCompletionMessage object types
+        if isinstance(msg, dict):
+            content = msg.get("content", "")
+            role = msg.get("role", "")
+            tool_calls = msg.get("tool_calls")
+        else:
+            # ChatCompletionMessage object
+            content = msg.content or ""
+            role = msg.role
+            tool_calls = getattr(msg, "tool_calls", None)
+
         if len(content) > 200:
             content = content[:100] + "...(truncated)"
-        if "tool_calls" in msg:
-            tool_calls_truncated = []
-            for call in msg["tool_calls"]:
-                call_truncated = {**call}
-                if "arguments" in call["function"]:
-                    args = call["function"]["arguments"]
-                    if len(args) > 200:
-                        call_truncated["function"]["arguments"] = (
-                            args[:200] + "...(truncated)"
-                        )
-                tool_calls_truncated.append(call_truncated)
 
-        new_msg = {**msg, "content": content}
-        if "tool_calls" in msg:
-            new_msg = {**msg, "content": content, "tool_calls": tool_calls_truncated}
+        new_msg = {"role": role, "content": content}
+
+        if tool_calls:
+            tool_calls_truncated = []
+            for call in tool_calls:
+                # Handle both dict and object types for tool calls
+                if isinstance(call, dict):
+                    call_dict = {**call}
+                    if "arguments" in call.get("function", {}):
+                        args = call["function"]["arguments"]
+                        if len(args) > 200:
+                            call_dict["function"]["arguments"] = (
+                                args[:200] + "...(truncated)"
+                            )
+                else:
+                    # ToolCall object
+                    call_dict = {
+                        "id": call.id,
+                        "type": call.type,
+                        "function": {
+                            "name": call.function.name,
+                            "arguments": call.function.arguments
+                        }
+                    }
+                    if len(call.function.arguments) > 200:
+                        call_dict["function"]["arguments"] = (
+                            call.function.arguments[:200] + "...(truncated)"
+                        )
+                tool_calls_truncated.append(call_dict)
+            new_msg["tool_calls"] = tool_calls_truncated
 
         truncated.append(new_msg)
-    output = json.dumps(truncated, indent=2)
+    """
+    output = json.dumps(messages, indent=2, ensure_ascii=False)
     print(output)
     print("-" * 40)
 
@@ -175,7 +205,7 @@ class HookManager:
                     text=True,
                     timeout=60,
                     check=False,
-                )
+                ) 
                 if r.returncode == 0:
                     print(f"    [Hook:{event}] stdout:{r.stdout.strip()}, stderr:{r.stderr.strip()}")
                 if r.returncode == 1:
@@ -194,6 +224,118 @@ class HookManager:
 
 
 hook_manager = HookManager()
+
+
+############################### Permission ###############################
+"""
+permission system design:
+- 4 stage permission control. block_check -> mode -> allow_check -> ask_user
+- 3 mode to choose
+
+Rule definition:
+class PermissionRule:
+    tool: str     # tool name
+    content: str  # what tool does
+    behavior: str # 'deny'/'allow'/'ask'
+
+"""
+@dataclass
+class PermissionRule:
+    tool: str
+    content: str
+    behavior: str
+
+class PermissionManager:
+    def __init__(self, mode: str = "default", rules: list = None):
+        self.modes: list[str] = ["default", "plan", "auto"]
+        if mode not in self.modes:
+            raise ValueError(f"Unknown mode: {mode}")
+        self.mode = mode
+        default_rules: list[PermissionRule] = [
+            PermissionRule(tool='bash', content='rm -rf /', behavior='deny'),
+            PermissionRule(tool='bash', content='sudo *', behavior='deny'),
+            PermissionRule(tool='read_file', content='*', behavior='allow')
+        ]
+        self.rules = rules or default_rules
+        self.write_tools = ["bash", "write_file", "edit_file"] # TODO any others write tools？
+        self.read_tools = ["read_file"] # TODO any others read tools？
+
+    def check(self, tool_name: str, tool_args: dict) -> dict:
+        """
+        check whether a tool is allowed to execute or not
+        input: tool_name and tool_arguments
+        return a dict that note the behavior and reason: {"behavior": "deny", "reason": "xxx"}
+        """
+        # stage 1: check block rules
+        for rule in self.rules:
+            if rule.behavior == 'deny' and self._match(rule, tool_name, tool_args):
+                print("Stage 1")
+                return {"behavior": "deny", "reason": f"Blocked by deny rule: {rule}"}
+        
+        # stage 2. check mode
+        if self.mode == "plan": # allow all read tools, deny all write tools
+            if tool_name in self.read_tools:
+                return {"behavior": "allow", "reason": f"Plan mode: read operation is allowed"}
+            elif tool_name in self.write_tools:
+                return {"behavior": "deny", "reason": f"Plan mode: write operation is denied"}
+        if self.mode == "auto": # allow all read tools, ask for write tools
+            if tool_name in self.read_tools:
+                return {"behavior": "allow", "reason": f"Auto mode: read operation is allowed"}
+            elif tool_name in self.write_tools:
+                return {"behavior": "ask", "reason": f"Auto mode: write operation is asked"}
+        
+        # if mode is default, ask user for any unmatched tool. But if it is a always-allow rule, allow it
+        # stage 3. check allow rules
+        for rule in self.rules:
+            if rule.behavior == 'allow' and self._match(rule, tool_name, tool_args):
+                print("Stage 3")
+                return {"behavior": "allow", "reason": f"Always-allow rule: {rule}"}
+        
+        # stage 4. ask user for any unmatched tool
+        print("Stage 4")
+        return {"behavior": "ask", "reason": f"No rule matches for tool {tool_name}, asking user"}
+
+    def ask_user(self, tool_name: str, tool_args: dict) -> bool:
+        """
+        ask user for permission
+        input: tool_name and tool_arguments
+        return bool: True if user grants permission, False otherwise
+        """
+        args = json.dumps(tool_args, ensure_ascii=False)
+        print(f"Asked for permission for tool [{tool_name}] with arguments [{args}]")
+        try:
+            response = input("  Allow (y/n/always-allow): ").strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            print("User interrupted the permission request.")
+            return False
+        if response in ("always-allow", "always"):
+            self.rules.append(PermissionRule(tool=tool_name, content='*', behavior='allow'))
+            return True
+        elif response in ("y", "yes"):
+            return True
+        print("User denied permission.")
+        return False
+
+    # TODO may be too simple, need to be improved
+    def _match(self, rule: PermissionRule, tool_name: str, tool_args: dict) -> bool:
+        """
+        check if a tool matches a rule
+        return bool: True if matches, False otherwise
+        """
+        # print(f"rule matching. rule: {rule}, tool: {tool_name}, args: {tool_args}")
+        if rule.tool != tool_name:
+            return False
+        
+        if tool_args.get("command", ""):
+            print(f"Matching command: {tool_args['command']}")
+            return fnmatch(tool_args["command"], rule.content)
+        if tool_args.get("path", ""):
+            print(f"Matching path: {tool_args['path']}")
+            return fnmatch(tool_args["path"], rule.content)
+        return False
+
+
+permission_manager = PermissionManager()
 
 ############################### Skill ###############################
 
@@ -1198,7 +1340,7 @@ def agent_loop(messages: list):
         messages = context_manager.compact(messages)
 
         # print messages before sending to the model for better debugging
-        debug_print_messages(messages)
+        # debug_print_messages(messages)
 
         response = client.chat.completions.create(
             model="kimi-k2.5",
@@ -1220,8 +1362,42 @@ def agent_loop(messages: list):
 
         used_todo = False
         if response.choices[0].finish_reason == "tool_calls":
+            """
+            format:
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "",
+                    "role": "assistant",
+                    "tool_calls": [
+                        {
+                            "id": "search:0",
+                            "type": "function",
+                            "function": {
+                                "arguments": "{\n\"query\": \"xxxxxx\"\n}",
+                                "name": "search"
+                            },
+                        }
+                    ]
+                }
+            }
+            """
             tool_calls = response.choices[0].message.tool_calls
 
+            # append tool calls info to messages history so that model can understand next time
+            # messages.append(response.choices[0].message)
+            # 把 'ChatCompletionMessage' object 转换为 dict，避免后续的很多麻烦
+            tool_call_msg = {"role": "assistant", "content": "", "tool_calls": []}
+            for call in tool_calls:
+                tool_call_msg["tool_calls"].append(
+                    {
+                        "id": call.id, 
+                        "type": "function", 
+                        "function": {"arguments": call.function.arguments, "name": call.function.name}
+                    }
+                )
+            messages.append(tool_call_msg)
+            
             for call in tool_calls:
 
                 # before_tool_call event
@@ -1230,33 +1406,33 @@ def agent_loop(messages: list):
 
                 print(f"hook result: {hook_result}")
 
-
-
-
-
-
                 # we only have one tool, so we can directly check the name
                 if call.function.name in registry.list_tools():
-                    args = json.loads(call.function.arguments)
-                    # print(f"Executing command: {args}")
-                    output = registry.get_tool(call.function.name).execute(**args)
-                    # Append the tool call and its output to messages for context
-                    messages.append(
-                        {
-                            "role": "assistant",
-                            "content": message.content,
-                            "tool_calls": [
-                                {
-                                    "id": call.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": call.function.name,
-                                        "arguments": call.function.arguments,
-                                    },
-                                }
-                            ],
-                        }
-                    )
+
+                    # check permission before every tool call
+                    decision = permission_manager.check(call.function.name, json.loads(call.function.arguments))
+                    output = ""
+                    if decision["behavior"] == "deny":
+                        # we need to return add this message to the model
+                        output = f"Permission denied. {decision['reason']}"
+                        print(f"Permission denied. {decision['reason']}")
+                    elif decision["behavior"] == "ask":
+                        user_allow = permission_manager.ask_user(call.function.name, call.function.arguments)
+                        if not user_allow:
+                            output = f"Permission denied by user for {call.function.name} with arguments {call.function.arguments}"
+                            print(f"Permission denied by user for {call.function.name} with arguments {call.function.arguments}")
+                        else:
+                            print(f"Permission allowed by user for {call.function.name} with arguments {call.function.arguments}")
+                            args = json.loads(call.function.arguments)
+                            # print(f"Executing command: {args}")
+                            output = registry.get_tool(call.function.name).execute(**args)
+                    else:
+                        # permission check passed, execute the tool
+                        args = json.loads(call.function.arguments)
+                        # print(f"Executing command: {args}")
+                        output = registry.get_tool(call.function.name).execute(**args)
+                    
+                    # append the tool call result to messages history for context
                     messages.append(
                         {
                             "role": "tool",
