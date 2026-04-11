@@ -695,6 +695,175 @@ class ContextManager:
 
 context_manager = ContextManager()
 
+
+############################### Memory Manager ###############################
+"""
+Memory System
+
+- Every memory item is a markdown file with frontmatter. Markdown file format is like:
+```markdown
+---
+name:
+type:
+description:
+---
+{content}
+```
+
+- The agent can use tool `save_memory()` to save a memory item. And rebuild index after each write.
+
+- The whole memory system is under WORKDIR/.memory/, which including:
+    - MEMORY.md
+    - memory_example_1.md
+    - memory_example_2.md
+    - ...
+
+- Use memory for:
+    - user preferences
+    - repeated user feedback
+    - project facts that are NOT obvious from the current code
+    - pointers to external resources
+
+"""
+
+class MemoryManager:
+    def __init__(self, memory_dir: Path):
+        self.dir = memory_dir
+        self.dir.mkdir(exist_ok=True)
+        self.types = ["user", "feedback", "project", "reference"]
+        self.index_file = self.dir / "MEMORY.md"
+        # store memory item in-memory: name -> {type, description, content}
+        self.memories: dict[str, dict] = {}
+
+    def load(self):
+        """
+        load all memory item from disk to in-memory
+        """
+        # 1. glob all .md file under memory dir
+        memory_files = list(self.dir.glob("*.md"))
+
+        # 2. read all .md file expect MEMORY.md into self.memories
+        for file in memory_files:
+            if file.name == "MEMORY.md":
+                continue
+            try:
+                content = file.read_text(encoding="utf-8")
+                metadata = self._parse_frontmatter(content)
+                if metadata:
+                    name = metadata.get("name", file.stem)
+                    self.memories[name] = {
+                        "type": metadata.get("type", "project"),
+                        "description": metadata.get("description", ""),
+                        "content": self._extract_body(content),
+                    }
+            except Exception as e:
+                print(f"Error loading memory file {file}: {e}")
+
+    def _parse_frontmatter(self, content: str) -> dict | None:
+        """Parse YAML frontmatter from markdown file."""
+        pattern = r"^---\n(.*?)\n---"
+        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
+        if not match:
+            return None
+        try:
+            return yaml.safe_load(match.group(1))
+        except Exception:
+            return None
+
+    def _extract_body(self, content: str) -> str:
+        """Extract the body content after frontmatter."""
+        pattern = r"^---\n.*?\n---\n?(.*)$"
+        match = re.search(pattern, content, re.DOTALL | re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+        return content.strip()
+
+    def build_memory_prompt(self) -> str:
+        """
+        build memory context for injection into the system prompt
+        """
+        if not self.memories:
+            return ""
+
+        parts = ["## Memories:"]
+        parts.append("")
+
+        # group memories by type
+        for mem_type in self.types:
+            type_memories = [
+                (name, data) for name, data in self.memories.items() if data["type"] == mem_type
+            ]
+            if not type_memories:
+                continue
+
+            parts.append(f"### {mem_type}")
+            for name, data in type_memories:
+                parts.append(f"- **{name}**: {data['description']}")
+                if data["content"]:
+                    parts.append(f"  {data['content']}")
+            parts.append("")
+
+        return "\n".join(parts)
+
+    def save_memory(self, name: str, mem_type: str, description: str, content: str) -> bool:
+        """
+        save memory to a new markdown file and return a status to indicate whether success or not
+        """
+        # validate type
+        if mem_type not in self.types:
+            print(f"Invalid memory type: {mem_type}. Must be one of {self.types}")
+            return False
+
+        # validate name (avoid special characters)
+        if not name or not re.match(r"^[\w\-]+$", name):
+            print(f"Invalid memory name: {name}. Use only letters, numbers, hyphens, and underscores.")
+            return False
+
+        # check for duplicate
+        if name in self.memories:
+            print(f"Memory with name '{name}' already exists. Use a different name or update existing memory.")
+            return False
+
+        # create markdown file with frontmatter
+        file_content = f"""---
+name: {name}
+type: {mem_type}
+description: {description}
+---
+{content}
+"""
+        file_path = self.dir / f"memory_{name}.md"
+        try:
+            file_path.write_text(file_content, encoding="utf-8")
+            # update in-memory cache
+            self.memories[name] = {
+                "type": mem_type,
+                "description": description,
+                "content": content,
+            }
+            print(f"Memory '{name}' saved successfully.")
+            return True
+        except Exception as e:
+            print(f"Error saving memory '{name}': {e}")
+            return False
+
+    def list_memories(self) -> str:
+        """List all memories with their metadata."""
+        if not self.memories:
+            return "No memories saved yet."
+
+        lines = []
+        for name, data in self.memories.items():
+            lines.append(f"- {name} [{data['type']}]: {data['description']}")
+        return "\n".join(lines)
+
+
+memory_dir = WORKDIR / ".memory"
+memory_manager = MemoryManager(memory_dir=memory_dir)
+memory_manager.load()
+
+
+
 ############################### Tools Definition ###############################
 
 
@@ -1300,6 +1469,86 @@ class CheckBackgroundTask(Tool):
         return status
 
 
+class SaveMemory(Tool):
+    def name(self) -> str:
+        return "save_memory"
+
+    def description(self) -> str:
+        return "Save a memory item for future reference. Use for user preferences, repeated feedback, project facts, or external references."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Unique name for the memory (letters, numbers, hyphens, underscores only)",
+                        },
+                        "type": {
+                            "type": "string",
+                            "enum": ["user", "feedback", "project", "reference"],
+                            "description": "Type of memory: user (preferences), feedback (repeated feedback), project (non-obvious facts), reference (external resources)",
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Brief description of what this memory contains",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "The actual memory content to save",
+                        },
+                    },
+                    "required": ["name", "type", "description", "content"],
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        name = kwargs.get("name", "")
+        mem_type = kwargs.get("type", "")
+        description = kwargs.get("description", "")
+        content = kwargs.get("content", "")
+        print(f"save_memory(name={name}, type={mem_type})")
+
+        if not name or not mem_type or not description:
+            return "Error: name, type, and description are required."
+
+        success = memory_manager.save_memory(name, mem_type, description, content)
+        if success:
+            return f"Memory '{name}' saved successfully. Type: {mem_type}"
+        return f"Failed to save memory '{name}'. Check the error message above."
+
+
+class ListMemories(Tool):
+    def name(self) -> str:
+        return "list_memories"
+
+    def description(self) -> str:
+        return "List all saved memories with their names, types, and descriptions."
+
+    def schema(self) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name(),
+                "description": self.description(),
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+        }
+
+    def execute(self, **kwargs) -> str:
+        print("list_memories()")
+        return memory_manager.list_memories()
+
+
 ############################### Agent Main Loop ###############################
 
 
@@ -1316,6 +1565,40 @@ registry.register(GetTask())
 registry.register(ListTasks())
 registry.register(RunBackgroundTask())
 registry.register(CheckBackgroundTask())
+registry.register(SaveMemory())
+registry.register(ListMemories())
+
+
+MEMORY_EXTRACT_INSTRUCTIONS = """
+When to save memories:
+- User states a preference ("I like tabs", "always use pytest") -> type: user
+- User corrects you ("don't do X", "that was wrong because...") -> type: feedback
+- You learn a project fact that is not easy to infer from current code alone
+  (for example: a rule exists because of compliance, or a legacy module must
+  stay untouched for business reasons) -> type: project
+- You learn where an external resource lives (ticket board, dashboard, docs URL)
+  -> type: reference
+
+When NOT to save:
+- Anything easily derivable from code (function signatures, file structure, directory layout)
+- Temporary task state (current branch, open PR numbers, current TODOs)
+- Secrets or credentials (API keys, passwords)
+"""
+
+def build_system_prompt() -> str:
+    """
+    Assemble system prompt from different parts
+    """
+    parts = [f" You are a coding agent at {WORKDIR}. Use available and appropriate tools to solve tasks."]
+
+    # load memories if available
+    memories = memory_manager.build_memory_prompt()
+    if memories:
+        parts.append(memories)
+    
+    parts.append(MEMORY_EXTRACT_INSTRUCTIONS)
+
+    return "\n\n".join(parts)
 
 
 def agent_loop(messages: list):
@@ -1464,30 +1747,8 @@ def agent_loop(messages: list):
 
 
 if __name__ == "__main__":
-    # query = 'Create a file called hello.py that prints "Hello, World!"'
-    # query = "Create a directory called test_output and write 3 files in it"
-
-    # query = "Create a file called greet.py with a greet(name) function"
-    # agent_loop(query)
-
-    # print(WORKDIR)
-    # print(safe_path("hello.py"))
-    # print(safe_path("../hello.py"))  # This should raise an error
-
     skill_loader = SkillLoader(Path(__file__).parent.parent.resolve() / "skills")
-
-    #     system_prompt = f" You are a coding agent at {WORKDIR}.\n \
-    # Use available and appropriate tools or skills to solve tasks. \n \
-    # - For complex tasks, use the `todo` tool to plan multi-step sub-tasks. Mark in_progress before starting, completed when done. \n \
-    # - Use the `sub_agent` tool to delegate exploration or subtasks. \n \
-    # - Use the `load_skill` tool to load instructions for a skill when needed.\n\n \
-    # Available skills:\n{skill_loader.list_skills()}\n"
-
-    system_prompt = f" You are a coding agent at {WORKDIR}.\n \
-Use available and appropriate tools or skills to solve tasks. \n \
-For complex tasks, use the task tool to plan and track your progress. \n \
-Use background_run for long-running commands."
-
+    system_prompt = build_system_prompt()
     history = [{"role": "system", "content": system_prompt}]
     while True:
         try:
