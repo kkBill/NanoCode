@@ -1,7 +1,10 @@
 """Main agent loop and orchestration."""
+import os
 import json
 
-from .config import MEMORY_EXTRACT_INSTRUCTIONS, WORKDIR, MODEL_NAME, client
+from openai.types.chat import ChatCompletion
+
+from .utils import debug_print_messages, debug_print_reasoning_content
 from .core import (
     hook_manager,
     permission_manager,
@@ -10,26 +13,19 @@ from .core import (
     memory_manager,
 )
 from .tools import registry
-
-
-def build_system_prompt() -> str:
-    """Assemble system prompt from different parts."""
-    parts = [f"You are a coding agent at {WORKDIR}. Use available and appropriate tools to solve tasks."]
-
-    # Load memories if available
-    memories = memory_manager.build_memory_prompt()
-    if memories:
-        parts.append(memories)
-
-    parts.append(MEMORY_EXTRACT_INSTRUCTIONS)
-
-    return "\n\n".join(parts)
+from .llm import OpenAIClient
 
 
 def agent_loop(messages: list):
-    """Main agent loop for processing messages and tool calls."""
-    # Track how many rounds since last todo update
-    round_since_last_todo = 0
+    """ Main agent loop """
+
+    API_KEY = os.getenv("DASHSCOPE_API_KEY") if os.getenv("DASHSCOPE_API_KEY") else ""
+    BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    client = OpenAIClient(api_key=API_KEY, base_url=BASE_URL)
+
+    # 用于控制finish_reason为length时的续写次数，避免无限续写
+    continuation_count = 0
+    max_continuations = 3
 
     while True:
         # Get all results from background tasks and append to messages
@@ -42,90 +38,175 @@ def agent_loop(messages: list):
             messages.append({"role": "user", "content": results_content})
             messages.append({"role": "assistant", "content": "Noted background results."})
 
+        # Compact messages to fit within token limits
         messages = context_manager.compact_tool_calls(messages)
         messages = context_manager.compact(messages)
 
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
+        # Print completed messages for debugging
+        debug_print_messages(messages)
+
+        # LLM call
+        response = client.chat(
+            model="kimi-k2.5",
             messages=messages,
             tools=registry.get_all_schemas(),
-            max_tokens=4096,
-            temperature=0.7,
             extra_body={"enable_thinking": True},
         )
+        if not response or not response.choices or len(response.choices) == 0:
+            print("No response from LLM call.")
+            continue
 
-        message = response.choices[0].message
+        # Print reasoning content for debugging
+        debug_print_reasoning_content(response.choices[0].message)
 
-        # Print reasoning content if available
-        if hasattr(message, "reasoning_content") and message.reasoning_content:
-            print("=" * 40)
-            print("🤔 reasoning content:")
-            print(message.reasoning_content)
-            print("=" * 40)
+        finish_reason = response.choices[0].finish_reason
 
-        used_todo = False
-        if response.choices[0].finish_reason == "tool_calls":
-            tool_calls = response.choices[0].message.tool_calls
+        if finish_reason == "tool_calls":
+            # The most important part in agent loop
+            handle_tool_calls(response, messages)
+        elif finish_reason == "length":
+            # Response meet the max_tokens limit
+            """
+            [NOTE]
+            "length" 表示模型的输出由于达到 max_tokens 上限而被截断, 从本质上讲, 这只表明模型的输出“到了篇幅上限”, 而不是“发生了错误”,
+            因此, 可以把截断的内容加回 messages, 并再注入一条提示, 让模型接着上文继续生成, 直到模型输出 "stop" 或者达到最大续写次数为止
+            但这仅是一种权宜之计, 存在很多局限性, 此处仅供学习.
 
-            # Convert tool calls to dict format
-            tool_call_msg = {"role": "assistant", "content": "", "tool_calls": []}
-            for call in tool_calls:
-                tool_call_msg["tool_calls"].append(
-                    {
-                        "id": call.id,
-                        "type": "function",
-                        "function": {"arguments": call.function.arguments, "name": call.function.name}
-                    }
-                )
-            messages.append(tool_call_msg)
-
-            for call in tool_calls:
-                # Before_tool_call hook
-                ctx = {"tool_name": call.function.name, "tool_args": call.function.arguments}
-                hook_result = hook_manager.run_hook("before_tool_call", ctx)
-
-                print(f"hook result: {hook_result}")
-
-                if call.function.name in registry.list_tools():
-                    # Check permission
-                    decision = permission_manager.check(call.function.name, json.loads(call.function.arguments))
-                    output = ""
-                    if decision["behavior"] == "deny":
-                        output = f"Permission denied. {decision['reason']}"
-                        print(f"Permission denied. {decision['reason']}")
-                    elif decision["behavior"] == "ask":
-                        user_allow = permission_manager.ask_user(call.function.name, call.function.arguments)
-                        # user_allow = True
-                        if not user_allow:
-                            output = f"Permission denied by user for {call.function.name}"
-                            print(f"Permission denied by user for {call.function.name}")
-                        else:
-                            print(f"Permission allowed by user for {call.function.name}")
-                            args = json.loads(call.function.arguments)
-                            output = registry.get_tool(call.function.name).execute(**args)
-                    else:
-                        # Permission check passed
-                        args = json.loads(call.function.arguments)
-                        output = registry.get_tool(call.function.name).execute(**args)
-
-                    # Append tool result to messages
-                    messages.append(
-                        {
-                            "role": "tool",
-                            "tool_call_id": call.id,
-                            "tool_name": call.function.name,
-                            "content": output,
-                        }
-                    )
-
-                if call.function.name == "todo":
-                    used_todo = True
-
-        elif response.choices[0].finish_reason == "stop":
+            业界主流的解决方法是从根本上避免触发 length, 而不是依赖续写来补救。包括:
+            - 提高 max_tokens, 遇到 length 时提示用户并直接返回截断内容
+            - 对上下文进行压缩
+            - 对任务进行分解, 使每次调用只做一件小事
+            """
+            continuation_count += 1
+            if continuation_count > max_continuations:
+                # TODO
+                # It should be an error log
+                print(f"Maximum continuations reached ({max_continuations}). Stopping further continuations.")
+                return "Response was too long and maximum continuations reached."
+            else:
+                print(f"Response was cut off due to length. Attempting continuation {continuation_count}/{max_continuations}...")
+                # Append the truncated content back to messages and prompt for continuation
+                truncated_content = response.choices[0].message.content
+                messages.append({"role": "assistant", "content": truncated_content})
+                messages.append({"role": "user", "content": "The previous response was cut off due to length. Please continue from where you left off."})
+        elif finish_reason == "stop":
+            # Normal finish, return the content to user and end the loop
             print("Final response:", response.choices[0].message.content)
             return response.choices[0].message.content
         else:
-            print(f"Unexpected finish reason: {response.choices[0].finish_reason}")
-            return f"Unexpected finish reason: {response.choices[0].finish_reason}"
+            print(f"Unexpected finish reason: {finish_reason}")
+            return f"Unexpected finish reason: {finish_reason}"
 
-        round_since_last_todo = 0 if used_todo else round_since_last_todo + 1
+
+def handle_tool_calls(response: ChatCompletion, messages: list):
+    """
+    Handle tool calls in the response.
+
+    Response with tool calls is as follows:
+    ```json
+    {
+        "finish_reason": "tool_calls",
+        "message": {
+            "content": "",
+            "role": "assistant",
+            "tool_calls": [
+                {
+                    "id": "search:0",
+                    "type": "function",
+                    "function": {
+                        "arguments": "{\n\"query\": \"xxxxxx\"\n}",
+                        "name": "search"
+                    },
+                }
+            ]
+        }
+    }
+    ```
+    """
+
+    tool_calls = response.choices[0].message.tool_calls
+    if not tool_calls or len(tool_calls) == 0:
+        # TODO
+        # 是否存在finish_reason是tool_calls但是没有tool_calls字段的情况？
+        # 如果有，这种情况应该怎么处理？目前先简单地打印日志并返回。
+        print("No tool calls found in the message.")
+        return
+
+    # Convert tool calls to dict format and append to messages history
+    tool_call_list: list[dict] = [
+        {
+            "id": call.id,
+            "type": "function",
+            "function": {"arguments": call.function.arguments, "name": call.function.name}  # type: ignore
+        }
+        for call in tool_calls
+    ]
+    tool_call_msg = {"role": "assistant", "content": "", "tool_calls": tool_call_list}
+    messages.append(tool_call_msg)
+
+    for call in tool_calls:
+        call_id = call.id
+        tool_name = call.function.name  # type: ignore
+        tool_args = call.function.arguments  # type: ignore
+
+        if tool_name not in registry.list_tools():
+            print(f"Tool {tool_name} not found.")
+            output = f"Tool {tool_name} not found."
+            messages.append({"role": "tool", "tool_call_id": call_id, "tool_name": tool_name, "content": output})
+            continue
+
+        # handle 'before_tool_call' event before tool call execution
+        handle_hook("before_tool_call", tool_name, tool_args)
+
+        # check permission
+        if handle_permission_check(tool_name, tool_args):
+            args = json.loads(tool_args)
+            tool = registry.get_tool(tool_name)
+            output = tool.execute(**args) if tool else f"Tool {tool_name} not found."
+        else:
+            # need to return denied output to the model so that it can adjust its plan accordingly
+            output = f"Permission denied for tool {tool_name} with args {tool_args}"
+
+        # append tool call result to messages history
+        messages.append({"role": "tool", "tool_call_id": call_id, "tool_name": tool_name, "content": output})
+
+
+# TODO
+# hook调用，需要重构
+# 如果hook调用失败，是否会阻断主agent的执行？
+# 是否需要把hook调用的结果返回给模型？比如，用户在'before_send_llm'这个hook里进行prompt注入，如何把这些信息返回给模型？
+def handle_hook(event: str, tool_name: str, tool_args: str):
+    """
+    Handle lifecycle hooks.
+
+    Hooks are custom logic that can be executed at specific points in the agent's operation,
+    such as before or after a tool call, or before sending messages to the LLM.
+    """
+    ctx = {"tool_name": tool_name, "tool_args": tool_args}
+    hook_result = hook_manager.run_hook(event, ctx)
+    print(f"hook result: {hook_result}")
+
+
+def handle_permission_check(tool_name: str, tool_args: str) -> bool:
+    """
+    Handle permission check for a tool call.
+
+    This function checks if the tool call is allowed based on predefined rules or by asking the user.
+    """
+    # decision = permission_manager.check(tool_name, json.loads(tool_args))
+
+    # if decision["behavior"] == "deny":
+    #     print(f"Permission denied. {decision['reason']}")
+    #     return False
+
+    # if decision["behavior"] == "ask":
+    #     user_allowed = permission_manager.ask_user(tool_name, json.loads(tool_args))
+    #     if not user_allowed:
+    #         print(f"Permission denied by user for {tool_name}")
+    #         return False
+    #     else:
+    #         print(f"Permission allowed by user for {tool_name}")
+    #         return True
+
+    # decision["behavior"] == "allow", permission check passed
+    return True

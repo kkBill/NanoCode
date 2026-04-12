@@ -1,13 +1,14 @@
-"""Context management for message compaction."""
-from ..config import client, MODEL_NAME
-
+from ..config import API_KEY, BASE_URL
+from ..llm import OpenAIClient
 
 class ContextManager:
     """Manage context window and message compaction."""
 
-    def __init__(self, token_threshold: int = 1024, keep_recent_rounds: int = 1):
+    def __init__(self, token_threshold: int = 4096, keep_recent_rounds: int = 1):
         self.token_threshold = token_threshold
         self.keep_recent_rounds = keep_recent_rounds
+        # TODO 待重构
+        self.client = OpenAIClient(api_key=API_KEY, base_url=BASE_URL)
 
     def compact_tool_calls(self, messages: list) -> list:
         """Compact tool call results before sending messages to the model."""
@@ -43,28 +44,30 @@ class ContextManager:
         context = "\n".join(
             [f"{msg['role']}: {msg['content']}" for msg in old_messages]
         )
-
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a helpful context manager. Summarize the following conversation history in a concise way, keeping important details and omitting trivial parts.",
-                },
-                {"role": "user", "content": context},
-            ],
-            max_tokens=1024,
-            temperature=0.5,
+        summary_prompt = (
+            "Summarize the following conversation for continuity. Keeping important details, include:\n"
+            "(1) Current state: what has been done, what is the current situation\n"
+            "(2) Key decisions: any important decisions made during the conversation\n"
+            "(3) Unresolved questions or tasks: what is still pending or needs attention\n"
+            "Again, keeping important details and omitting trivial parts.\n"
+            f"\n## Conversation:\n{context}\n\n## Summary:"
         )
+
+        new_messages = [
+            {"role": "system", "content": "You are a helpful context manager."},
+            {"role": "user", "content": summary_prompt},
+        ]
+        response = self.client.chat(model="kimi-k2.5", messages=new_messages)
+        if not response or not response.choices or len(response.choices) == 0:
+            print("No response from LLM for context compaction. Returning original messages.")
+            return messages
+        
         summary = response.choices[0].message.content.strip()
 
         # Return compacted messages with summary + recent messages
         pre_messages = [
             {"role": "user", "content": f"Summary of previous conversation: {summary}"},
-            {
-                "role": "assistant",
-                "content": "Understood. I have the context from the summary. Continuing.",
-            },
+            {"role": "assistant", "content": "Understood. I have the context from the summary. Continuing."},
         ]
         return pre_messages + messages[-(self.keep_recent_rounds * 2) :]
 

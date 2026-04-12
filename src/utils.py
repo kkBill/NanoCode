@@ -3,13 +3,20 @@ import json
 from pathlib import Path
 
 
-def debug_print_messages(messages):
+def debug_print_messages(messages: list):
     """Print messages for debugging purposes."""
     print("-" * 40)
     output = json.dumps(messages, indent=2, ensure_ascii=False)
     print(output)
     print("-" * 40)
 
+def debug_print_reasoning_content(message):
+    """Print reasoning content if available."""
+    if hasattr(message, "reasoning_content") and message.reasoning_content:
+        print("=" * 40)
+        print("🤔 reasoning content:")
+        print(message.reasoning_content)
+        print("=" * 40)
 
 def safe_path(p: str, workdir: Path) -> Path:
     """

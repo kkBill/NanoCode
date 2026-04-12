@@ -1,5 +1,5 @@
 """NanoCode agent package."""
-from .agent import agent_loop, build_system_prompt
+from .agent import agent_loop
 from .config import WORKDIR, MODEL_NAME, client
 from .core import (
     hook_manager,
@@ -14,7 +14,6 @@ from .tools import registry
 
 __all__ = [
     "agent_loop",
-    "build_system_prompt",
     "WORKDIR",
     "MODEL_NAME",
     "client",

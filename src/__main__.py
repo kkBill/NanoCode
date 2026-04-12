@@ -1,14 +1,8 @@
-"""Entry point for the NanoCode agent."""
-from os import system
-from pathlib import Path
-
-from .agent import agent_loop, build_system_prompt
-from .core import skill_loader, system_prompt_builder
-
+from .agent import agent_loop
+from .core import system_prompt_builder
 
 def main():
     """Main entry point for the agent."""
-    # system_prompt = build_system_prompt()
     system_prompt = system_prompt_builder.build()
     history = [{"role": "system", "content": system_prompt}]
 
@@ -23,7 +17,7 @@ def main():
             print("Current system prompt:")
             print(system_prompt)
             continue
-        
+
         history.append({"role": "user", "content": query})
         agent_loop(history)
         response_content = history[-1]["content"]
