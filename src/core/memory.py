@@ -64,7 +64,7 @@ class MemoryManager:
         if not self.memories:
             return ""
 
-        parts = ["## Memories:", ""]
+        parts = ["# Memories\nYou have access to the following persistent memories:"]
 
         # Group memories by type
         for mem_type in self.types:
@@ -74,11 +74,11 @@ class MemoryManager:
             if not type_memories:
                 continue
 
-            parts.append(f"### {mem_type}")
+            parts.append(f"## {mem_type}")
             for name, data in type_memories:
-                parts.append(f"- **{name}**: {data['description']}")
+                parts.append(f"- {name}: {data['description']}")
                 if data["content"]:
-                    parts.append(f"  {data['content']}")
+                    parts.append(f" {data['content']}")
             parts.append("")
 
         return "\n".join(parts)

@@ -1,5 +1,4 @@
 """Memory management tools."""
-from ..core import memory_manager
 from .base import Tool
 
 
@@ -45,6 +44,8 @@ class SaveMemory(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import memory_manager
+
         name = kwargs.get("name", "")
         mem_type = kwargs.get("type", "")
         description = kwargs.get("description", "")
@@ -83,5 +84,7 @@ class ListMemories(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import memory_manager
+
         print("list_memories()")
         return memory_manager.list_memories()

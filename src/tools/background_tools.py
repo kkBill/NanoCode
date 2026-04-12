@@ -1,5 +1,4 @@
 """Background task execution tools."""
-from ..core import background_manager
 from .base import Tool
 
 
@@ -29,6 +28,8 @@ class RunBackgroundTask(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import background_manager
+
         command = kwargs.get("command", "")
         print(f"run_background_task(command={command})")
 
@@ -64,6 +65,8 @@ class CheckBackgroundTask(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import background_manager
+
         task_id = kwargs.get("task_id", None)
         print(f"check_background_task(task_id={task_id})")
 

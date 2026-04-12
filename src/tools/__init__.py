@@ -19,7 +19,7 @@ class ToolRegistry:
         """Register a tool in the registry."""
         self.tools[tool.name()] = tool
 
-    def get_tool(self, name: str):
+    def get_tool(self, name: str) -> Tool | None:
         """Get a tool by name."""
         return self.tools.get(name, None)
 

@@ -55,7 +55,8 @@ class SkillLoader:
 
     def list_skills(self) -> str:
         """List all available skills."""
-        skills = []
+        lines = ["<Available Skills>"]
+        
         for item in self.skill_dir.iterdir():
             if not item.is_dir():
                 continue
@@ -66,6 +67,9 @@ class SkillLoader:
             name = item.name
             metadata = self.load_metadata(name)
             description = metadata.get("description", "No description available.")
-            skills.append(f" - {name}: {description}")
+            # lines.append(f" - {name}: {description}")
+            lines.append(f"    <name>{name}</name>")
+            lines.append(f"    <description>{description}</description>")
 
-        return "\n".join(skills)
+        lines.append("</Available Skills>")
+        return "\n".join(lines)

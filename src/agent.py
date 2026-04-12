@@ -1,4 +1,6 @@
 """Main agent loop and orchestration."""
+import json
+
 from .config import MEMORY_EXTRACT_INSTRUCTIONS, WORKDIR, MODEL_NAME, client
 from .core import (
     hook_manager,
@@ -8,7 +10,6 @@ from .core import (
     memory_manager,
 )
 from .tools import registry
-import json
 
 
 def build_system_prompt() -> str:

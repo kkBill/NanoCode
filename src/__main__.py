@@ -1,13 +1,15 @@
 """Entry point for the NanoCode agent."""
+from os import system
 from pathlib import Path
 
 from .agent import agent_loop, build_system_prompt
-from .core import skill_loader
+from .core import skill_loader, system_prompt_builder
 
 
 def main():
     """Main entry point for the agent."""
-    system_prompt = build_system_prompt()
+    # system_prompt = build_system_prompt()
+    system_prompt = system_prompt_builder.build()
     history = [{"role": "system", "content": system_prompt}]
 
     while True:
@@ -15,8 +17,13 @@ def main():
             query = input("\033[36mNanoCode >> \033[0m")
         except (EOFError, KeyboardInterrupt):
             break
-        if query.strip().lower() in ("q", "exit", ""):
+        if query.strip().lower() in ("q", "exit", "quit"):
             break
+        if query.strip().lower() == "/prompt":
+            print("Current system prompt:")
+            print(system_prompt)
+            continue
+        
         history.append({"role": "user", "content": query})
         agent_loop(history)
         response_content = history[-1]["content"]

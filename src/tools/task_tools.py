@@ -1,5 +1,4 @@
 """Task management tools."""
-from ..core import task_manager
 from .base import Tool
 
 
@@ -29,6 +28,8 @@ class CreateTask(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import task_manager
+
         description = kwargs.get("description", "")
         print(f"create_task(description={description})")
 
@@ -79,6 +80,8 @@ class UpdateTask(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import task_manager
+
         task_id = kwargs.get("task_id", None)
         status = kwargs.get("status", "")
         add_blocked_by = kwargs.get("add_blocked_by", [])
@@ -125,6 +128,8 @@ class GetTask(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import task_manager
+
         task_id = kwargs.get("task_id", None)
         print(f"get_task(id={task_id})")
 
@@ -161,6 +166,8 @@ class ListTasks(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import task_manager
+
         print("list_tasks()")
         tasks = task_manager.list_tasks()
         return tasks

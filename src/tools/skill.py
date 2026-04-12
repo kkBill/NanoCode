@@ -1,5 +1,4 @@
 """Skill loading tool."""
-from ..core import skill_loader
 from .base import Tool
 
 
@@ -29,6 +28,8 @@ class LoadSkill(Tool):
         }
 
     def execute(self, **kwargs) -> str:
+        from ..core import skill_loader
+
         skill_name = kwargs.get("skill_name", "")
         print(f"load_skill(name={skill_name})")
 
