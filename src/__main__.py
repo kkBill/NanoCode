@@ -1,8 +1,12 @@
 from .agent import agent_loop
 from .core import system_prompt_builder
+from .core import cron_scheduler
 
 def main():
     """Main entry point for the agent."""
+
+    cron_scheduler.start()  # Start the cron scheduler background thread
+
     system_prompt = system_prompt_builder.build()
     history = [{"role": "system", "content": system_prompt}]
 
@@ -23,6 +27,8 @@ def main():
         response_content = history[-1]["content"]
         print(f"\033[32mNanoCode << {response_content}\033[0m")
         print()
+
+    cron_scheduler.stop()  # Stop the cron scheduler background thread before exiting
 
 
 if __name__ == "__main__":

@@ -2,7 +2,10 @@
 import os
 import json
 
+from annotated_types import T
 from openai.types.chat import ChatCompletion
+
+from src.core import cron
 
 from .utils import debug_print_messages, debug_print_reasoning_content
 from .core import (
@@ -11,6 +14,7 @@ from .core import (
     background_manager,
     context_manager,
     memory_manager,
+    cron_scheduler,
 )
 from .tools import registry
 from .llm import OpenAIClient
@@ -22,6 +26,7 @@ def agent_loop(messages: list):
     API_KEY = os.getenv("DASHSCOPE_API_KEY") if os.getenv("DASHSCOPE_API_KEY") else ""
     BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
     client = OpenAIClient(api_key=API_KEY, base_url=BASE_URL)
+
 
     # 用于控制finish_reason为length时的续写次数，避免无限续写
     continuation_count = 0
@@ -37,6 +42,15 @@ def agent_loop(messages: list):
         if results_content:
             messages.append({"role": "user", "content": results_content})
             messages.append({"role": "assistant", "content": "Noted background results."})
+
+        cron_tasks: list[cron.CronTask] = cron_scheduler.drain_notify_queue()
+        cron_results = [
+            f"Cron task {t.id} triggered. Prompt: {t.prompt}."
+            for t in cron_tasks
+        ]
+        cron_results_content = "\n".join(cron_results)
+        if cron_results_content:
+            messages.append({"role": "user", "content": cron_results_content})
 
         # Compact messages to fit within token limits
         messages = context_manager.compact_tool_calls(messages)

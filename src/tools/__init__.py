@@ -7,6 +7,7 @@ from .skill import LoadSkill
 from .task_tools import CreateTask, UpdateTask, GetTask, ListTasks
 from .background_tools import RunBackgroundTask, CheckBackgroundTask
 from .memory_tools import SaveMemory, ListMemories
+from .cron_tool import CreateCron, DeleteCron
 
 
 class ToolRegistry:
@@ -59,6 +60,9 @@ registry.register(RunBackgroundTask())
 registry.register(CheckBackgroundTask())
 registry.register(SaveMemory())
 registry.register(ListMemories())
+registry.register(CreateCron())
+registry.register(DeleteCron())
+
 
 __all__ = [
     "Tool",
@@ -77,4 +81,6 @@ __all__ = [
     "CheckBackgroundTask",
     "SaveMemory",
     "ListMemories",
+    "CreateCron",
+    "DeleteCron",
 ]

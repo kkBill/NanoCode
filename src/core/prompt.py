@@ -38,7 +38,7 @@ class SystemPromptBuilder:
         parts.append(self._build_memory())
         parts.append(self._build_claude())
 
-        parts.append("=== Dynamic Boundary ===")
+        parts.append("___Dynamic Boundary___")
         parts.append(self._build_dynamic_context())
         return "\n\n".join(parts)
 
