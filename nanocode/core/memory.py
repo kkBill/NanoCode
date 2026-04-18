@@ -1,19 +1,20 @@
 """Memory management system."""
+import logging
 import re
 from pathlib import Path
 
 import yaml
 
-from ..config import WORKDIR
+from ..utils import WORK_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class MemoryManager:
     """Manage persistent memories with YAML frontmatter markdown files."""
 
-    def __init__(self, memory_dir: Path = None):
-        if memory_dir is None:
-            memory_dir = WORKDIR / ".memory"
-        self.dir = memory_dir
+    def __init__(self):
+        self.dir = WORK_DIR / ".memory"
         self.dir.mkdir(exist_ok=True)
         self.types = ["user", "feedback", "project", "reference"]
         self.index_file = self.dir / "MEMORY.md"
@@ -38,7 +39,7 @@ class MemoryManager:
                         "content": self._extract_body(content),
                     }
             except Exception as e:
-                print(f"Error loading memory file {file}: {e}")
+                logger.exception("Error loading memory file %s: %s", file, e)
 
     def _parse_frontmatter(self, content: str) -> dict | None:
         """Parse YAML frontmatter from markdown file."""
@@ -87,17 +88,17 @@ class MemoryManager:
         """Save memory to a new markdown file."""
         # Validate type
         if mem_type not in self.types:
-            print(f"Invalid memory type: {mem_type}. Must be one of {self.types}")
+            logger.warning("Invalid memory type: %s. Must be one of %s", mem_type, self.types)
             return False
 
         # Validate name (avoid special characters)
         if not name or not re.match(r"^[\w\-]+$", name):
-            print(f"Invalid memory name: {name}. Use only letters, numbers, hyphens, and underscores.")
+            logger.warning("Invalid memory name: %s. Use only letters, numbers, hyphens, and underscores.", name)
             return False
 
         # Check for duplicate
         if name in self.memories:
-            print(f"Memory with name '{name}' already exists. Use a different name or update existing memory.")
+            logger.warning("Memory with name '%s' already exists. Use a different name or update existing memory.", name)
             return False
 
         # Create markdown file with frontmatter
@@ -117,10 +118,10 @@ description: {description}
                 "description": description,
                 "content": content,
             }
-            print(f"Memory '{name}' saved successfully.")
+            logger.info("Memory '%s' saved successfully.", name)
             return True
         except Exception as e:
-            print(f"Error saving memory '{name}': {e}")
+            logger.exception("Error saving memory '%s': %s", name, e)
             return False
 
     def list_memories(self) -> str:

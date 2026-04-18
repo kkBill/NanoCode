@@ -1,5 +1,9 @@
 """Background task execution tools."""
+import logging
+
 from .base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 class RunBackgroundTask(Tool):
@@ -31,7 +35,7 @@ class RunBackgroundTask(Tool):
         from ..core import background_manager
 
         command = kwargs.get("command", "")
-        print(f"run_background_task(command={command})")
+        logger.info("run_background_task(command=%s)", command)
 
         if not command:
             return "No command provided for background task."
@@ -68,7 +72,7 @@ class CheckBackgroundTask(Tool):
         from ..core import background_manager
 
         task_id = kwargs.get("task_id", None)
-        print(f"check_background_task(task_id={task_id})")
+        logger.info("check_background_task(task_id=%s)", task_id)
 
         status = background_manager.check_status(task_id)
         return status

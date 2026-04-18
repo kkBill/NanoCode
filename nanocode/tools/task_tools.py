@@ -1,5 +1,11 @@
 """Task management tools."""
+import logging
+
 from .base import Tool
+
+logger = logging.getLogger(__name__)
+
+
 
 
 class CreateTask(Tool):
@@ -31,7 +37,7 @@ class CreateTask(Tool):
         from ..core import task_manager
 
         description = kwargs.get("description", "")
-        print(f"create_task(description={description})")
+        logger.info("create_task(description=%s)", description)
 
         if not description:
             return "No task description provided."
@@ -86,8 +92,12 @@ class UpdateTask(Tool):
         status = kwargs.get("status", "")
         add_blocked_by = kwargs.get("add_blocked_by", [])
         add_blocks = kwargs.get("add_blocks", [])
-        print(
-            f"update_task(id={task_id}, status={status}, add_blocked_by={add_blocked_by}, add_blocks={add_blocks})"
+        logger.info(
+            "update_task(id=%s, status=%s, add_blocked_by=%s, add_blocks=%s)",
+            task_id,
+            status,
+            add_blocked_by,
+            add_blocks,
         )
 
         if not task_id:
@@ -131,7 +141,7 @@ class GetTask(Tool):
         from ..core import task_manager
 
         task_id = kwargs.get("task_id", None)
-        print(f"get_task(id={task_id})")
+        logger.info("get_task(id=%s)", task_id)
 
         if not task_id:
             return "No task id provided."
@@ -168,6 +178,6 @@ class ListTasks(Tool):
     def execute(self, **kwargs) -> str:
         from ..core import task_manager
 
-        print("list_tasks()")
+        logger.info("list_tasks()")
         tasks = task_manager.list_tasks()
         return tasks

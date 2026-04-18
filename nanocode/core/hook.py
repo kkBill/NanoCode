@@ -1,10 +1,12 @@
 """Hook system for lifecycle events."""
 import json
+import logging
 import os
 import subprocess
-from pathlib import Path
 
-from ..config import WORKDIR
+from ..utils import NANOCODE_HOME, WORK_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class HookManager:
@@ -19,9 +21,8 @@ class HookManager:
     - 2: Tool still executes but stderr is injected as message
     """
 
-    def __init__(self, config_path: Path = None) -> None:
-        default_config_path = WORKDIR / "config.json"
-        self.config_path = config_path or default_config_path
+    def __init__(self) -> None:
+        self.config_path = NANOCODE_HOME / "config.json"
         # Define supported hook events
         self.hook_events = [
             "before_tool_call",
@@ -36,13 +37,13 @@ class HookManager:
                 config = json.loads(self.config_path.read_text(encoding="utf-8"))
                 hooks_config = config.get("hooks", {})
                 if not hooks_config or not isinstance(hooks_config, dict):
-                    print(f"Invalid hooks configuration in {self.config_path}")
+                    logger.warning("Invalid hooks configuration in %s", self.config_path)
                     return
                 for event in self.hook_events:
                     if event in hooks_config:
                         self.hooks[event] = hooks_config.get(event, [])
             except Exception as e:
-                print(f"Error loading hooks from {self.config_path}: {str(e)}")
+                logger.exception("Error loading hooks from %s: %s", self.config_path, e)
 
     def run_hook(self, event: str, context: dict = None) -> dict:
         """
@@ -53,7 +54,7 @@ class HookManager:
         result = {"blocked": False, "messages": []}
 
         if event not in self.hook_events:
-            print(f"Unsupported hook event: {event}")
+            logger.warning("Unsupported hook event: %s", event)
             return result
 
         hooks = self.hooks.get(event, [])
@@ -72,7 +73,7 @@ class HookManager:
                 r = subprocess.run(
                     command,
                     shell=True,
-                    cwd=WORKDIR,
+                    cwd=WORK_DIR,
                     env=env,
                     capture_output=True,
                     text=True,
@@ -80,17 +81,17 @@ class HookManager:
                     check=False,
                 )
                 if r.returncode == 0:
-                    print(f"    [Hook:{event}] stdout:{r.stdout.strip()}, stderr:{r.stderr.strip()}")
+                    logger.info("[Hook:%s] stdout:%s, stderr:%s", event, r.stdout.strip(), r.stderr.strip())
                 if r.returncode == 1:
                     result["blocked"] = True
                     result["blocked_reason"] = r.stderr.strip() or f"Blocked by hook {event}"
-                    print(f"    [Hook:{event}] blocked the operation with command: {command}")
+                    logger.warning("[Hook:%s] blocked the operation with command: %s", event, command)
                 elif r.returncode == 2:
                     msg = r.stdout.strip()
                     if msg:
                         result["messages"].append(msg)
-                    print(f"    [Hook:{event}] injected message: {msg} with command: {command}")
+                    logger.info("[Hook:%s] injected message: %s with command: %s", event, msg, command)
             except Exception as e:
-                print(f"Error running hook for event {event} with command {command}: {str(e)}")
+                logger.exception("Error running hook for event %s with command %s: %s", event, command, e)
 
         return result

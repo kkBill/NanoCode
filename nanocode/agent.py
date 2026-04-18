@@ -1,11 +1,13 @@
 """Main agent loop and orchestration."""
+
+import logging
 import os
 import json
+from dotenv import load_dotenv
 
-from annotated_types import T
 from openai.types.chat import ChatCompletion
 
-from src.core import cron
+from nanocode.core import cron
 
 from .utils import debug_print_messages, debug_print_reasoning_content
 from .core import (
@@ -19,14 +21,15 @@ from .core import (
 from .tools import registry
 from .llm import OpenAIClient
 
+logger = logging.getLogger(__name__)
 
 def agent_loop(messages: list):
-    """ Main agent loop """
-
-    API_KEY = os.getenv("DASHSCOPE_API_KEY") if os.getenv("DASHSCOPE_API_KEY") else ""
-    BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-    client = OpenAIClient(api_key=API_KEY, base_url=BASE_URL)
-
+    """Main agent loop"""
+    load_dotenv()
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    openai_base_url = os.getenv("OPENAI_BASE_URL")
+    model = os.getenv("MODEL", "kimi-2.5")
+    client = OpenAIClient(api_key=openai_api_key, base_url=openai_base_url)
 
     # 用于控制finish_reason为length时的续写次数，避免无限续写
     continuation_count = 0
@@ -41,12 +44,13 @@ def agent_loop(messages: list):
         results_content = "\n".join(background_results)
         if results_content:
             messages.append({"role": "user", "content": results_content})
-            messages.append({"role": "assistant", "content": "Noted background results."})
+            messages.append(
+                {"role": "assistant", "content": "Noted background results."}
+            )
 
         cron_tasks: list[cron.CronTask] = cron_scheduler.drain_notify_queue()
         cron_results = [
-            f"Cron task {t.id} triggered. Prompt: {t.prompt}."
-            for t in cron_tasks
+            f"Cron task {t.id} triggered. Prompt: {t.prompt}." for t in cron_tasks
         ]
         cron_results_content = "\n".join(cron_results)
         if cron_results_content:
@@ -61,13 +65,13 @@ def agent_loop(messages: list):
 
         # LLM call
         response = client.chat(
-            model="kimi-k2.5",
+            model=model,
             messages=messages,
             tools=registry.get_all_schemas(),
             extra_body={"enable_thinking": True},
         )
         if not response or not response.choices or len(response.choices) == 0:
-            print("No response from LLM call.")
+            logger.warning("No response from LLM call.")
             continue
 
         # Print reasoning content for debugging
@@ -93,22 +97,29 @@ def agent_loop(messages: list):
             """
             continuation_count += 1
             if continuation_count > max_continuations:
-                # TODO
-                # It should be an error log
-                print(f"Maximum continuations reached ({max_continuations}). Stopping further continuations.")
+                logger.error("Maximum continuations reached (%d). Stopping further continuations.", max_continuations)
                 return "Response was too long and maximum continuations reached."
             else:
-                print(f"Response was cut off due to length. Attempting continuation {continuation_count}/{max_continuations}...")
+                logger.info(
+                    "Response was cut off due to length. Attempting continuation %d/%d...",
+                    continuation_count,
+                    max_continuations,
+                )
                 # Append the truncated content back to messages and prompt for continuation
                 truncated_content = response.choices[0].message.content
                 messages.append({"role": "assistant", "content": truncated_content})
-                messages.append({"role": "user", "content": "The previous response was cut off due to length. Please continue from where you left off."})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "The previous response was cut off due to length. Please continue from where you left off.",
+                    }
+                )
         elif finish_reason == "stop":
             # Normal finish, return the content to user and end the loop
-            print("Final response:", response.choices[0].message.content)
+            logger.info("Final response: %s", response.choices[0].message.content)
             return response.choices[0].message.content
         else:
-            print(f"Unexpected finish reason: {finish_reason}")
+            logger.warning("Unexpected finish reason: %s", finish_reason)
             return f"Unexpected finish reason: {finish_reason}"
 
 
@@ -137,13 +148,13 @@ def handle_tool_calls(response: ChatCompletion, messages: list):
     }
     ```
     """
-
-    tool_calls = response.choices[0].message.tool_calls
+    message = response.choices[0].message
+    tool_calls = message.tool_calls
     if not tool_calls or len(tool_calls) == 0:
         # TODO
         # 是否存在finish_reason是tool_calls但是没有tool_calls字段的情况？
         # 如果有，这种情况应该怎么处理？目前先简单地打印日志并返回。
-        print("No tool calls found in the message.")
+        logger.warning("No tool calls found in the message.")
         return
 
     # Convert tool calls to dict format and append to messages history
@@ -151,11 +162,18 @@ def handle_tool_calls(response: ChatCompletion, messages: list):
         {
             "id": call.id,
             "type": "function",
-            "function": {"arguments": call.function.arguments, "name": call.function.name}  # type: ignore
+            "function": {"arguments": call.function.arguments, "name": call.function.name},  # type: ignore
         }
         for call in tool_calls
     ]
-    tool_call_msg = {"role": "assistant", "content": "", "tool_calls": tool_call_list}
+    tool_call_msg = {
+        "role": "assistant",
+        "content": message.content,
+        "tool_calls": tool_call_list,
+    }
+    # KEY. if enable thinking, then we must keep reasoning_content
+    if hasattr(message, "reasoning_content") and message.reasoning_content:  # type: ignore
+        tool_call_msg["reasoning_content"] = message.reasoning_content  # type: ignore
     messages.append(tool_call_msg)
 
     for call in tool_calls:
@@ -164,9 +182,16 @@ def handle_tool_calls(response: ChatCompletion, messages: list):
         tool_args = call.function.arguments  # type: ignore
 
         if tool_name not in registry.list_tools():
-            print(f"Tool {tool_name} not found.")
+            logger.warning("Tool %s not found.", tool_name)
             output = f"Tool {tool_name} not found."
-            messages.append({"role": "tool", "tool_call_id": call_id, "tool_name": tool_name, "content": output})
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "tool_name": tool_name,
+                    "content": output,
+                }
+            )
             continue
 
         # handle 'before_tool_call' event before tool call execution
@@ -182,7 +207,14 @@ def handle_tool_calls(response: ChatCompletion, messages: list):
             output = f"Permission denied for tool {tool_name} with args {tool_args}"
 
         # append tool call result to messages history
-        messages.append({"role": "tool", "tool_call_id": call_id, "tool_name": tool_name, "content": output})
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "tool_name": tool_name,
+                "content": output,
+            }
+        )
 
 
 # TODO
@@ -198,7 +230,7 @@ def handle_hook(event: str, tool_name: str, tool_args: str):
     """
     ctx = {"tool_name": tool_name, "tool_args": tool_args}
     hook_result = hook_manager.run_hook(event, ctx)
-    print(f"hook result: {hook_result}")
+    logger.debug("hook result: %s", hook_result)
 
 
 def handle_permission_check(tool_name: str, tool_args: str) -> bool:

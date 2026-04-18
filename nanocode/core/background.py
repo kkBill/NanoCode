@@ -3,7 +3,7 @@ import subprocess
 import threading
 import uuid
 
-from ..config import WORKDIR
+from ..utils import WORK_DIR
 
 
 class BackgroundManager:
@@ -33,7 +33,7 @@ class BackgroundManager:
             r = subprocess.run(
                 command,
                 shell=True,
-                cwd=WORKDIR,
+                cwd=WORK_DIR,
                 capture_output=True,
                 text=True,
                 timeout=300,

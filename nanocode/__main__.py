@@ -1,6 +1,23 @@
+import logging
+from pathlib import Path
+
 from .agent import agent_loop
 from .core import system_prompt_builder
 from .core import cron_scheduler
+
+# Configure logging once at startup
+project_root = Path(__file__).parent.parent.resolve()
+log_dir = project_root / "logs"
+log_dir.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        # logging.StreamHandler(),  # log to console
+        logging.FileHandler(log_dir / "nanocode.log", encoding="utf-8"),
+    ],
+)
 
 def main():
     """Main entry point for the agent."""
@@ -23,8 +40,7 @@ def main():
             continue
 
         history.append({"role": "user", "content": query})
-        agent_loop(history)
-        response_content = history[-1]["content"]
+        response_content = agent_loop(history)
         print(f"\033[32mNanoCode << {response_content}\033[0m")
         print()
 

@@ -1,3 +1,4 @@
+import logging
 import time
 import random
 from openai import (
@@ -7,8 +8,10 @@ from openai import (
 )
 from openai._types import Omit
 
+logger = logging.getLogger(__name__)
+
 class OpenAIClient:
-    def __init__(self, api_key: str, base_url: str):
+    def __init__(self, api_key: str | None, base_url: str | None):
         if not api_key:
             raise ValueError("API key is required for OpenAIClient.")
         if not base_url:
@@ -23,7 +26,7 @@ class OpenAIClient:
         messages: list,
         tools: list | None = None,
         max_tokens: int = 4096,
-        temperature: float = 0.7,
+        temperature: float = 1.0,
         extra_body: dict | None = None,
         retry: int = 3,
         delay: int = 2,
@@ -41,17 +44,16 @@ class OpenAIClient:
                 )
                 return response
             except (APIStatusError, APIConnectionError) as e:
-                # TODO 错误信息要写到日志里
-                print(f"API error on attempt {attempt + 1}/{retry}: {e}")
+                logger.error("API error on attempt %d/%d: %s", attempt + 1, retry, e)
                 if attempt < retry - 1:
                     backoff_delay = self._backoff_delay(attempt, base_delay=delay)
-                    print(f"Retrying in {backoff_delay} seconds...")
+                    logger.info("Retrying in %.1f seconds...", backoff_delay)
                     time.sleep(backoff_delay)
                 else:
-                    print(f"Max retries ({retry} times) reached. Raising exception.")
+                    logger.error("Max retries (%d times) reached. Raising exception.", retry)
                     raise
             except Exception as e:
-                print(f"Unexpected error during LLM call: {e}")
+                logger.exception("Unexpected error during LLM call: %s", e)
                 raise
 
     def _backoff_delay(self, attempt: int, base_delay: int = 2) -> float:

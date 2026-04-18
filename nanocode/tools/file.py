@@ -1,7 +1,11 @@
 """File I/O tools."""
+import logging
+
 from ..utils import safe_path
-from ..config import WORKDIR
+from ..utils import WORK_DIR
 from .base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 class ReadFile(Tool):
@@ -15,10 +19,10 @@ class ReadFile(Tool):
 
     def execute(self, **kwargs) -> str:
         path = kwargs.get("filename", "")
-        print(f"read_file({path})")
+        logger.info("read_file(%s)", path)
 
         try:
-            real_path = safe_path(path, WORKDIR)
+            real_path = safe_path(path, WORK_DIR)
             content = real_path.read_text(encoding="utf-8")
             return content[:50000] if content else "(empty file)"
         except Exception as e:
@@ -51,10 +55,10 @@ class WriteFile(Tool):
     def execute(self, **kwargs) -> str:
         path = kwargs.get("filename", "")
         content = kwargs.get("content", "")
-        print(f"write_file({path}, content length={len(content)})")
+        logger.info("write_file(%s, content length=%d)", path, len(content))
 
         try:
-            real_path = safe_path(path, WORKDIR)
+            real_path = safe_path(path, WORK_DIR)
             real_path.write_text(content)
             return "File written successfully"
         except Exception as e:

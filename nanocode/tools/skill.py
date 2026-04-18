@@ -1,5 +1,9 @@
 """Skill loading tool."""
+import logging
+
 from .base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 class LoadSkill(Tool):
@@ -31,7 +35,7 @@ class LoadSkill(Tool):
         from ..core import skill_loader
 
         skill_name = kwargs.get("skill_name", "")
-        print(f"load_skill(name={skill_name})")
+        logger.info("load_skill(name=%s)", skill_name)
 
         if not skill_name:
             return "No skill name provided."

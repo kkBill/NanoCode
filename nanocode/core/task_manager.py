@@ -2,16 +2,14 @@
 import json
 from pathlib import Path
 
-from ..config import WORKDIR
+from ..utils import NANOCODE_HOME
 
 
 class TaskManager:
     """Graph-based task manager to track multiple tasks and their dependencies."""
 
-    def __init__(self, task_dir: Path = None):
-        if task_dir is None:
-            task_dir = WORKDIR / ".tasks"
-        self.dir = task_dir
+    def __init__(self):
+        self.dir = NANOCODE_HOME / ".tasks"
         self.dir.mkdir(exist_ok=True)
         self._next_id = self._max_id() + 1
 

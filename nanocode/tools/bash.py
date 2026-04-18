@@ -1,8 +1,11 @@
 """Bash command execution tool."""
+import logging
 import os
 import subprocess
 
 from .base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 class Bash(Tool):
@@ -16,7 +19,7 @@ class Bash(Tool):
 
     def execute(self, **kwargs) -> str:
         command = kwargs.get("command", "")
-        print(f"bash({command})")
+        logger.info("bash(%s)", command)
 
         dangerous = ["rm -rf /", "sudo", "shutdown", "reboot", "> /dev/"]
         if any(d in command for d in dangerous):

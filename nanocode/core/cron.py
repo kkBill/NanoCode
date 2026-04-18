@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from croniter import croniter
 
-from ..config import WORKDIR
+from ..utils import NANOCODE_HOME
 
 """
 如何设计一个定时任务系统？
@@ -50,8 +50,8 @@ class CronTask:
     last_triggered_at: str | None = None
 
 class CronScheduler:
-    def __init__(self, work_dir: Path | None = None):
-        self.work_dir = work_dir or WORKDIR
+    def __init__(self):
+        self.scheduled_tasks_file = NANOCODE_HOME / "scheduled_tasks.json"
         self.tasks = {}  # task_id -> CronTask
         self.notify_queue = queue.Queue()
         self._stop_event = threading.Event()  # 用于通知后台线程停止
@@ -111,7 +111,7 @@ class CronScheduler:
             return False
         task = self.tasks[task_id]
         if task.persistent_mode == "durable":
-            path = self.work_dir / "config.json"
+            path = self.scheduled_tasks_file
             if path.exists():
                 config = json.loads(path.read_text(encoding="utf-8"))
                 cron_tasks = config.get("cron_tasks", {})
@@ -127,7 +127,7 @@ class CronScheduler:
     
     def _load_tasks(self):
         """Load durable tasks from disk."""
-        path = self.work_dir / "config.json"
+        path = self.scheduled_tasks_file
         if not path.exists():
             return
         config = json.loads(path.read_text(encoding="utf-8"))
@@ -140,7 +140,7 @@ class CronScheduler:
 
     def _save_task(self, task: CronTask):
         """Save durable task to disk."""
-        path = self.work_dir / "config.json"
+        path = self.scheduled_tasks_file
         if not path.exists():
             config = {"cron_tasks": {}}
         else:
@@ -149,7 +149,6 @@ class CronScheduler:
         cron_tasks[task.id] = task.__dict__  # 将CronTask对象转换为字典
         config["cron_tasks"] = cron_tasks
         path.write_text(json.dumps(config, indent=2), encoding="utf-8")
-
 
     def drain_notify_queue(self) -> list[CronTask]:
         """Drain the notify queue and return the list of triggered tasks."""

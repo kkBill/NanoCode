@@ -1,5 +1,9 @@
 """Memory management tools."""
+import logging
+
 from .base import Tool
+
+logger = logging.getLogger(__name__)
 
 
 class SaveMemory(Tool):
@@ -50,7 +54,7 @@ class SaveMemory(Tool):
         mem_type = kwargs.get("type", "")
         description = kwargs.get("description", "")
         content = kwargs.get("content", "")
-        print(f"save_memory(name={name}, type={mem_type})")
+        logger.info("save_memory(name=%s, type=%s)", name, mem_type)
 
         if not name or not mem_type or not description:
             return "Error: name, type, and description are required."
@@ -86,5 +90,5 @@ class ListMemories(Tool):
     def execute(self, **kwargs) -> str:
         from ..core import memory_manager
 
-        print("list_memories()")
+        logger.info("list_memories()")
         return memory_manager.list_memories()

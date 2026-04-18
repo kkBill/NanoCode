@@ -1,8 +1,14 @@
 """Sub-agent spawning tool."""
 import json
+import logging
+import os
+from dotenv import load_dotenv
 
-from ..config import client, MODEL_NAME, WORKDIR
+from ..utils import WORK_DIR
 from .base import Tool
+from ..llm import OpenAIClient
+
+logger = logging.getLogger(__name__)
 
 
 class SubAgent(Tool):
@@ -32,12 +38,18 @@ class SubAgent(Tool):
 
     def execute(self, **kwargs) -> str:
         task = kwargs.get("task", "")
-        print(f"sub_agent(task={task})")
+        logger.info("sub_agent(task=%s)", task)
 
         if not task:
             return "No task provided for sub-agent."
+        
+        load_dotenv()
+        openai_api_key = os.getenv("OPENAI_API_KEY")
+        openai_base_url = os.getenv("OPENAI_BASE_URL")
+        model = os.getenv("MODEL", "kimi-2.5")
+        client = OpenAIClient(api_key=openai_api_key, base_url=openai_base_url)
 
-        system_prompt = f"You are a coding sub-agent at {WORKDIR}. Complete a given task and return concise summary. Use available tools to solve it. Prefer tools over prose."
+        system_prompt = f"You are a coding sub-agent at {WORK_DIR}. Complete a given task and return concise summary. Use available tools to solve it. Prefer tools over prose."
         history = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": task},
@@ -49,21 +61,23 @@ class SubAgent(Tool):
         # Sub-agent loop with limited rounds to prevent infinite recursion
         for _ in range(5):
             response = client.chat.completions.create(
-                model=MODEL_NAME,
+                model=model,
                 messages=history,
                 tools=registry.get_schemas_for_subagent(),
                 max_tokens=4096,
-                temperature=0.7,
+                temperature=1.0,
                 extra_body={"enable_thinking": True},
             )
 
             message = response.choices[0].message
 
             if hasattr(message, "reasoning_content") and message.reasoning_content:
-                print("=" * 40)
-                print("🤔 sub-agent reasoning content:")
-                print(message.reasoning_content)
-                print("=" * 40)
+                logger.debug(
+                    "Sub-agent reasoning content:\n%s\n🤔 sub-agent reasoning content:\n%s\n%s",
+                    "=" * 40,
+                    message.reasoning_content,
+                    "=" * 40,
+                )
 
             if response.choices[0].finish_reason == "tool_calls":
                 tool_calls = response.choices[0].message.tool_calls
@@ -99,8 +113,9 @@ class SubAgent(Tool):
             elif response.choices[0].finish_reason == "stop":
                 break
             else:
-                print(
-                    f"Unexpected finish reason in sub-agent: {response.choices[0].finish_reason}"
+                logger.warning(
+                    "Unexpected finish reason in sub-agent: %s",
+                    response.choices[0].finish_reason,
                 )
                 break
 

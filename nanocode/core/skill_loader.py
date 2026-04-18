@@ -1,17 +1,14 @@
-"""Skill loading system."""
 import re
-from pathlib import Path
-
 import yaml
 
-from ..config import SKILLS_DIR
+from ..utils import SKILLS_DIR
 
 
 class SkillLoader:
     """Load skills from SKILL.md files."""
 
-    def __init__(self, skill_dir: Path = SKILLS_DIR):
-        self.skill_dir = skill_dir
+    def __init__(self):
+        self.skill_dir = SKILLS_DIR
 
     def load_skill(self, name: str) -> str | None:
         """Load skill content by name."""

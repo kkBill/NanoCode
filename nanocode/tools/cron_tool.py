@@ -1,4 +1,9 @@
+import logging
+
 from .base import Tool
+
+logger = logging.getLogger(__name__)
+
 
 class CreateCron(Tool):
     def name(self) -> str:
@@ -35,7 +40,7 @@ class CreateCron(Tool):
         trigger_mode = kwargs.get("trigger_mode", "")
         persistent_mode = kwargs.get("persistent_mode", "")
         prompt = kwargs.get("prompt", "")
-        print(f"Creating cron task with cron_expr={cron_expr}, trigger_mode={trigger_mode}, persistent_mode={persistent_mode}, prompt={prompt}")
+        logger.info("Creating cron task with cron_expr=%s, trigger_mode=%s, persistent_mode=%s, prompt=%s", cron_expr, trigger_mode, persistent_mode, prompt)
 
         task = cron_scheduler.create_task(cron_expr, trigger_mode, persistent_mode, prompt)
         if task:
@@ -71,7 +76,7 @@ class DeleteCron(Tool):
         from ..core import cron_scheduler
 
         task_id = kwargs.get("task_id", "")
-        print(f"Deleting cron task with id={task_id}")
+        logger.info("Deleting cron task with id=%s", task_id)
 
         if cron_scheduler.delete_task(task_id):
             return f"Cron task {task_id} deleted successfully."

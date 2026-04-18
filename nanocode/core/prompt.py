@@ -3,7 +3,7 @@ import datetime
 import os
 from pathlib import Path
 
-from ..config import WORKDIR
+from ..utils import WORK_DIR
 from ..tools.base import Tool
 
 
@@ -18,8 +18,8 @@ class SystemPromptBuilder:
     6. dynamic context: some runtime info and turn-specific info
     """
 
-    def __init__(self, work_dir: Path | None = None) -> None:
-        self.work_dir = work_dir or WORKDIR
+    def __init__(self) -> None:
+        self.work_dir = WORK_DIR
         # Delay imports to avoid circular import
         # These are imported here because this class is instantiated in core/__init__.py
         # and importing at module level would cause circular import

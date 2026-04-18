@@ -1,7 +1,10 @@
 """Permission system for tool access control."""
+import logging
 from dataclasses import dataclass
 from fnmatch import fnmatch
 import json
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -39,7 +42,7 @@ class PermissionManager:
         # Stage 1: Check block rules
         for rule in self.rules:
             if rule.behavior == 'deny' and self._match(rule, tool_name, tool_args):
-                print("Stage 1")
+                logger.debug("Stage 1: blocked by deny rule")
                 return {"behavior": "deny", "reason": f"Blocked by deny rule: {rule}"}
 
         # Stage 2: Check mode
@@ -57,28 +60,28 @@ class PermissionManager:
         # Stage 3: Check allow rules
         for rule in self.rules:
             if rule.behavior == 'allow' and self._match(rule, tool_name, tool_args):
-                print("Stage 3")
+                logger.debug("Stage 3: matched allow rule")
                 return {"behavior": "allow", "reason": f"Always-allow rule: {rule}"}
 
         # Stage 4: Ask user for any unmatched tool
-        print("Stage 4")
+        logger.debug("Stage 4: no rule matched, asking user")
         return {"behavior": "ask", "reason": f"No rule matches for tool {tool_name}, asking user"}
 
     def ask_user(self, tool_name: str, tool_args: dict) -> bool:
         """Ask user for permission to execute a tool."""
         args = json.dumps(tool_args, ensure_ascii=False)
-        print(f"Asked for permission for tool [{tool_name}] with arguments [{args}]")
+        logger.info("Asked for permission for tool [%s] with arguments [%s]", tool_name, args)
         try:
             response = input("  Allow (y/n/always-allow): ").strip().lower()
         except (KeyboardInterrupt, EOFError):
-            print("User interrupted the permission request.")
+            logger.info("User interrupted the permission request.")
             return False
         if response in ("always-allow", "always"):
             self.rules.append(PermissionRule(tool=tool_name, content='*', behavior='allow'))
             return True
         elif response in ("y", "yes"):
             return True
-        print("User denied permission.")
+        logger.info("User denied permission.")
         return False
 
     def _match(self, rule: PermissionRule, tool_name: str, tool_args: dict) -> bool:
@@ -87,9 +90,9 @@ class PermissionManager:
             return False
 
         if tool_args.get("command", ""):
-            print(f"Matching command: {tool_args['command']}")
+            logger.debug("Matching command: %s", tool_args["command"])
             return fnmatch(tool_args["command"], rule.content)
         if tool_args.get("path", ""):
-            print(f"Matching path: {tool_args['path']}")
+            logger.debug("Matching path: %s", tool_args["path"])
             return fnmatch(tool_args["path"], rule.content)
         return False
