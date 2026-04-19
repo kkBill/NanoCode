@@ -4,6 +4,7 @@ from pathlib import Path
 from .agent import agent_loop
 from .core import system_prompt_builder
 from .core import cron_scheduler
+from .message import Message, SystemMessage, UserMessage
 
 # Configure logging once at startup
 project_root = Path(__file__).parent.parent.resolve()
@@ -25,7 +26,7 @@ def main():
     cron_scheduler.start()  # Start the cron scheduler background thread
 
     system_prompt = system_prompt_builder.build()
-    history = [{"role": "system", "content": system_prompt}]
+    history: list[Message] = [SystemMessage(content=system_prompt)]
 
     while True:
         try:
@@ -39,7 +40,7 @@ def main():
             print(system_prompt)
             continue
 
-        history.append({"role": "user", "content": query})
+        history.append(UserMessage(content=query))
         response_content = agent_loop(history)
         print(f"\033[32mNanoCode << {response_content}\033[0m")
         print()

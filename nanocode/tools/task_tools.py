@@ -6,8 +6,6 @@ from .base import Tool
 logger = logging.getLogger(__name__)
 
 
-
-
 class CreateTask(Tool):
     """Create a new task."""
 

@@ -8,6 +8,8 @@ from openai import (
 )
 from openai._types import Omit
 
+from ..message import Message
+
 logger = logging.getLogger(__name__)
 
 class OpenAIClient:
@@ -31,11 +33,16 @@ class OpenAIClient:
         retry: int = 3,
         delay: int = 2,
     ):
+        # Normalize Message objects to plain dicts for the OpenAI SDK
+        dict_messages = [
+            msg.to_dict() if isinstance(msg, Message) else msg for msg in messages
+        ]
+
         for attempt in range(retry):
             try:
                 response = self.client.chat.completions.create(
                     model=model,
-                    messages=messages,
+                    messages=dict_messages,
                     # 遵循OpenAI SDK参数规范, 如果tools为None则传递Omit()表示不传递该参数. None不等价于Omit().
                     tools=tools if tools else Omit(),
                     max_tokens=max_tokens,

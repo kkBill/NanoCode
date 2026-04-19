@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from ..utils import WORK_DIR
 from .base import Tool
 from ..llm import OpenAIClient
+from ..message import Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage, ToolCall, ToolCallFunction
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ class SubAgent(Tool):
 
         if not task:
             return "No task provided for sub-agent."
-        
+
         load_dotenv()
         openai_api_key = os.getenv("OPENAI_API_KEY")
         openai_base_url = os.getenv("OPENAI_BASE_URL")
@@ -50,9 +51,9 @@ class SubAgent(Tool):
         client = OpenAIClient(api_key=openai_api_key, base_url=openai_base_url)
 
         system_prompt = f"You are a coding sub-agent at {WORK_DIR}. Complete a given task and return concise summary. Use available tools to solve it. Prefer tools over prose."
-        history = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": task},
+        history: list[Message] = [
+            SystemMessage(content=system_prompt),
+            UserMessage(content=task),
         ]
 
         # Import registry here to avoid circular import
@@ -60,7 +61,7 @@ class SubAgent(Tool):
 
         # Sub-agent loop with limited rounds to prevent infinite recursion
         for _ in range(5):
-            response = client.chat.completions.create(
+            response = client.chat(
                 model=model,
                 messages=history,
                 tools=registry.get_schemas_for_subagent(),
@@ -87,28 +88,26 @@ class SubAgent(Tool):
                         args = json.loads(call.function.arguments)
                         output = registry.get_tool(call.function.name).execute(**args)
                         history.append(
-                            {
-                                "role": "assistant",
-                                "content": message.content,
-                                "tool_calls": [
-                                    {
-                                        "id": call.id,
-                                        "type": "function",
-                                        "function": {
-                                            "name": call.function.name,
-                                            "arguments": call.function.arguments,
-                                        },
-                                    }
+                            AssistantMessage(
+                                content=message.content or "",
+                                tool_calls=[
+                                    ToolCall(
+                                        id=call.id,
+                                        type=call.type,
+                                        function=ToolCallFunction(
+                                            name=call.function.name,
+                                            arguments=call.function.arguments,
+                                        ),
+                                    )
                                 ],
-                            }
+                            )
                         )
                         history.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": call.id,
-                                "tool_name": call.function.name,
-                                "content": output,
-                            }
+                            ToolMessage(
+                                tool_call_id=call.id,
+                                tool_name=call.function.name,
+                                content=output,
+                            )
                         )
             elif response.choices[0].finish_reason == "stop":
                 break

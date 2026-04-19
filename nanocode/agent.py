@@ -20,15 +20,24 @@ from .core import (
 )
 from .tools import registry
 from .llm import OpenAIClient
+from .message import (
+    Message,
+    AssistantMessage,
+    ToolMessage,
+    UserMessage,
+    ToolCall,
+    ToolCallFunction,
+)
 
 logger = logging.getLogger(__name__)
 
-def agent_loop(messages: list):
+
+def agent_loop(messages: list[Message]):
     """Main agent loop"""
     load_dotenv()
     openai_api_key = os.getenv("OPENAI_API_KEY")
     openai_base_url = os.getenv("OPENAI_BASE_URL")
-    model = os.getenv("MODEL", "kimi-2.5")
+    model = os.getenv("MODEL", "kimi-k2.5")
     client = OpenAIClient(api_key=openai_api_key, base_url=openai_base_url)
 
     # 用于控制finish_reason为length时的续写次数，避免无限续写
@@ -43,10 +52,8 @@ def agent_loop(messages: list):
         ]
         results_content = "\n".join(background_results)
         if results_content:
-            messages.append({"role": "user", "content": results_content})
-            messages.append(
-                {"role": "assistant", "content": "Noted background results."}
-            )
+            messages.append(UserMessage(content=results_content))
+            messages.append(AssistantMessage(content="Noted background results."))
 
         cron_tasks: list[cron.CronTask] = cron_scheduler.drain_notify_queue()
         cron_results = [
@@ -54,11 +61,11 @@ def agent_loop(messages: list):
         ]
         cron_results_content = "\n".join(cron_results)
         if cron_results_content:
-            messages.append({"role": "user", "content": cron_results_content})
+            messages.append(UserMessage(content=cron_results_content))
 
-        # Compact messages to fit within token limits
-        messages = context_manager.compact_tool_calls(messages)
-        messages = context_manager.compact(messages)
+        # Compact messages to fit within token limits (in-place mutation)
+        context_manager.compact_tool_calls(messages)
+        context_manager.compact(messages)
 
         # Print completed messages for debugging
         debug_print_messages(messages)
@@ -97,7 +104,10 @@ def agent_loop(messages: list):
             """
             continuation_count += 1
             if continuation_count > max_continuations:
-                logger.error("Maximum continuations reached (%d). Stopping further continuations.", max_continuations)
+                logger.error(
+                    "Maximum continuations reached (%d). Stopping further continuations.",
+                    max_continuations,
+                )
                 return "Response was too long and maximum continuations reached."
             else:
                 logger.info(
@@ -107,13 +117,8 @@ def agent_loop(messages: list):
                 )
                 # Append the truncated content back to messages and prompt for continuation
                 truncated_content = response.choices[0].message.content
-                messages.append({"role": "assistant", "content": truncated_content})
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": "The previous response was cut off due to length. Please continue from where you left off.",
-                    }
-                )
+                messages.append(AssistantMessage(content=truncated_content))
+                messages.append(UserMessage(content="The previous response was cut off due to length. Please continue from where you left off."))
         elif finish_reason == "stop":
             # Normal finish, return the content to user and end the loop
             logger.info("Final response: %s", response.choices[0].message.content)
@@ -123,7 +128,7 @@ def agent_loop(messages: list):
             return f"Unexpected finish reason: {finish_reason}"
 
 
-def handle_tool_calls(response: ChatCompletion, messages: list):
+def handle_tool_calls(response: ChatCompletion, messages: list[Message]):
     """
     Handle tool calls in the response.
 
@@ -157,24 +162,24 @@ def handle_tool_calls(response: ChatCompletion, messages: list):
         logger.warning("No tool calls found in the message.")
         return
 
-    # Convert tool calls to dict format and append to messages history
-    tool_call_list: list[dict] = [
-        {
-            "id": call.id,
-            "type": "function",
-            "function": {"arguments": call.function.arguments, "name": call.function.name},  # type: ignore
-        }
+    # Convert tool calls to ToolCall objects and append to messages history
+    tool_call_list = [
+        ToolCall(
+            id=call.id,
+            type=call.type,
+            function=ToolCallFunction(
+                name=call.function.name,
+                arguments=call.function.arguments,
+            ),
+        )
         for call in tool_calls
     ]
-    tool_call_msg = {
-        "role": "assistant",
-        "content": message.content,
-        "tool_calls": tool_call_list,
-    }
-    # KEY. if enable thinking, then we must keep reasoning_content
-    if hasattr(message, "reasoning_content") and message.reasoning_content:  # type: ignore
-        tool_call_msg["reasoning_content"] = message.reasoning_content  # type: ignore
-    messages.append(tool_call_msg)
+    assistant_msg = AssistantMessage(
+        content=message.content or "",
+        tool_calls=tool_call_list,
+        reasoning_content=getattr(message, "reasoning_content", "") or "",
+    )
+    messages.append(assistant_msg)
 
     for call in tool_calls:
         call_id = call.id
@@ -184,14 +189,7 @@ def handle_tool_calls(response: ChatCompletion, messages: list):
         if tool_name not in registry.list_tools():
             logger.warning("Tool %s not found.", tool_name)
             output = f"Tool {tool_name} not found."
-            messages.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "tool_name": tool_name,
-                    "content": output,
-                }
-            )
+            messages.append(ToolMessage(tool_call_id=call_id, tool_name=tool_name, content=output))
             continue
 
         # handle 'before_tool_call' event before tool call execution
@@ -207,14 +205,7 @@ def handle_tool_calls(response: ChatCompletion, messages: list):
             output = f"Permission denied for tool {tool_name} with args {tool_args}"
 
         # append tool call result to messages history
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": call_id,
-                "tool_name": tool_name,
-                "content": output,
-            }
-        )
+        messages.append(ToolMessage(tool_call_id=call_id, tool_name=tool_name, content=output))
 
 
 # TODO

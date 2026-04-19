@@ -13,7 +13,7 @@ class PermissionRule:
 
     tool: str     # Tool name
     content: str  # What tool does (pattern)
-    behavior: str # 'deny'/'allow'/'ask'
+    behavior: str  # 'deny'/'allow'/'ask'
 
 
 class PermissionManager:
