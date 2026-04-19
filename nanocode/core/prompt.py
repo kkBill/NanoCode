@@ -1,10 +1,11 @@
 """System prompt builder."""
+
 import datetime
 import os
 from pathlib import Path
 
-from ..utils import WORK_DIR
 from ..tools.base import Tool
+from ..utils import WORK_DIR
 
 
 class SystemPromptBuilder:
@@ -23,8 +24,9 @@ class SystemPromptBuilder:
         # Delay imports to avoid circular import
         # These are imported here because this class is instantiated in core/__init__.py
         # and importing at module level would cause circular import
-        from . import memory_manager, skill_loader
         from ..tools import registry
+        from . import memory_manager, skill_loader
+
         self.memory_manager = memory_manager
         self.skill_loader = skill_loader
         self.registry = registry

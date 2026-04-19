@@ -1,16 +1,18 @@
 import logging
-import time
 import random
+import time
+
 from openai import (
-    OpenAI,
-    APIStatusError,
     APIConnectionError,
+    APIStatusError,
+    OpenAI,
 )
 from openai._types import Omit
 
 from ..message import Message
 
 logger = logging.getLogger(__name__)
+
 
 class OpenAIClient:
     def __init__(self, api_key: str | None, base_url: str | None):
@@ -34,9 +36,7 @@ class OpenAIClient:
         delay: int = 2,
     ):
         # Normalize Message objects to plain dicts for the OpenAI SDK
-        dict_messages = [
-            msg.to_dict() if isinstance(msg, Message) else msg for msg in messages
-        ]
+        dict_messages = [msg.to_dict() if isinstance(msg, Message) else msg for msg in messages]
 
         for attempt in range(retry):
             try:
@@ -68,4 +68,4 @@ class OpenAIClient:
         exponential backoff delay with jitter.
         backoff_delay = base_delay * (2^attempt) + random(0,1)
         """
-        return min(base_delay * (2 ** attempt), self.max_delay) + random.uniform(0, 1)
+        return min(base_delay * (2**attempt), self.max_delay) + random.uniform(0, 1)

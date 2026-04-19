@@ -1,13 +1,14 @@
 """Tool registry and exports."""
+
+from .background_tools import CheckBackgroundTask, RunBackgroundTask
 from .base import Tool
 from .bash import Bash
-from .file import ReadFile, WriteFile
-from .subagent import SubAgent
-from .skill import LoadSkill
-from .task_tools import CreateTask, UpdateTask, GetTask, ListTasks
-from .background_tools import RunBackgroundTask, CheckBackgroundTask
-from .memory_tools import SaveMemory, ListMemories
 from .cron_tool import CreateCron, DeleteCron
+from .file import ReadFile, WriteFile
+from .memory_tools import ListMemories, SaveMemory
+from .skill import LoadSkill
+from .subagent import SubAgent
+from .task_tools import CreateTask, GetTask, ListTasks, UpdateTask
 
 
 class ToolRegistry:
@@ -30,9 +31,7 @@ class ToolRegistry:
 
     def get_schemas_for_subagent(self):
         """Get schemas for sub-agent (excludes sub_agent to avoid infinite recursion)."""
-        return [
-            tool.schema() for name, tool in self.tools.items() if name != "sub_agent"
-        ]
+        return [tool.schema() for name, tool in self.tools.items() if name != "sub_agent"]
 
     def list_tools(self):
         """List all tool names."""

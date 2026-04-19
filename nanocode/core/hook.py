@@ -1,4 +1,5 @@
 """Hook system for lifecycle events."""
+
 import json
 import logging
 import os

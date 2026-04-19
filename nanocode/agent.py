@@ -1,33 +1,33 @@
 """Main agent loop and orchestration."""
 
+import json
 import logging
 import os
-import json
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv
 from openai.types.chat import ChatCompletion
 
 from nanocode.core import cron
 
-from .utils import debug_print_messages, debug_print_reasoning_content
 from .core import (
-    hook_manager,
-    permission_manager,
     background_manager,
     context_manager,
-    memory_manager,
     cron_scheduler,
+    hook_manager,
+    memory_manager,
+    permission_manager,
 )
-from .tools import registry
 from .llm import OpenAIClient
 from .message import (
-    Message,
     AssistantMessage,
-    ToolMessage,
-    UserMessage,
+    Message,
     ToolCall,
     ToolCallFunction,
+    ToolMessage,
+    UserMessage,
 )
+from .tools import registry
+from .utils import debug_print_messages, debug_print_reasoning_content
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +46,14 @@ def agent_loop(messages: list[Message]):
 
     while True:
         # Get all results from background tasks and append to messages
-        background_results = [
-            f"Task {r['task_id']} finished with status {r['status']}. Command: {r['command']}. Result: {r['result']}"
-            for r in background_manager.get_result()
-        ]
+        background_results = [f"Task {r['task_id']} finished with status {r['status']}. Command: {r['command']}. Result: {r['result']}" for r in background_manager.get_result()]
         results_content = "\n".join(background_results)
         if results_content:
             messages.append(UserMessage(content=results_content))
             messages.append(AssistantMessage(content="Noted background results."))
 
         cron_tasks: list[cron.CronTask] = cron_scheduler.drain_notify_queue()
-        cron_results = [
-            f"Cron task {t.id} triggered. Prompt: {t.prompt}." for t in cron_tasks
-        ]
+        cron_results = [f"Cron task {t.id} triggered. Prompt: {t.prompt}." for t in cron_tasks]
         cron_results_content = "\n".join(cron_results)
         if cron_results_content:
             messages.append(UserMessage(content=cron_results_content))

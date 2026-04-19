@@ -1,8 +1,9 @@
 """Permission system for tool access control."""
+
+import json
 import logging
 from dataclasses import dataclass
 from fnmatch import fnmatch
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 class PermissionRule:
     """Rule definition for permissions."""
 
-    tool: str     # Tool name
+    tool: str  # Tool name
     content: str  # What tool does (pattern)
     behavior: str  # 'deny'/'allow'/'ask'
 
@@ -25,9 +26,9 @@ class PermissionManager:
             raise ValueError(f"Unknown mode: {mode}")
         self.mode = mode
         default_rules: list[PermissionRule] = [
-            PermissionRule(tool='bash', content='rm -rf /', behavior='deny'),
-            PermissionRule(tool='bash', content='sudo *', behavior='deny'),
-            PermissionRule(tool='read_file', content='*', behavior='allow')
+            PermissionRule(tool="bash", content="rm -rf /", behavior="deny"),
+            PermissionRule(tool="bash", content="sudo *", behavior="deny"),
+            PermissionRule(tool="read_file", content="*", behavior="allow"),
         ]
         self.rules = rules or default_rules
         self.write_tools = ["bash", "write_file", "edit_file"]
@@ -41,7 +42,7 @@ class PermissionManager:
         """
         # Stage 1: Check block rules
         for rule in self.rules:
-            if rule.behavior == 'deny' and self._match(rule, tool_name, tool_args):
+            if rule.behavior == "deny" and self._match(rule, tool_name, tool_args):
                 logger.debug("Stage 1: blocked by deny rule")
                 return {"behavior": "deny", "reason": f"Blocked by deny rule: {rule}"}
 
@@ -59,7 +60,7 @@ class PermissionManager:
 
         # Stage 3: Check allow rules
         for rule in self.rules:
-            if rule.behavior == 'allow' and self._match(rule, tool_name, tool_args):
+            if rule.behavior == "allow" and self._match(rule, tool_name, tool_args):
                 logger.debug("Stage 3: matched allow rule")
                 return {"behavior": "allow", "reason": f"Always-allow rule: {rule}"}
 
@@ -77,7 +78,7 @@ class PermissionManager:
             logger.info("User interrupted the permission request.")
             return False
         if response in ("always-allow", "always"):
-            self.rules.append(PermissionRule(tool=tool_name, content='*', behavior='allow'))
+            self.rules.append(PermissionRule(tool=tool_name, content="*", behavior="allow"))
             return True
         elif response in ("y", "yes"):
             return True

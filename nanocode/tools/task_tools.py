@@ -1,4 +1,5 @@
 """Task management tools."""
+
 import logging
 
 from .base import Tool
@@ -102,9 +103,7 @@ class UpdateTask(Tool):
             return "No task id provided."
 
         try:
-            updated_task = task_manager.update_task(
-                task_id, status, add_blocked_by, add_blocks
-            )
+            updated_task = task_manager.update_task(task_id, status, add_blocked_by, add_blocks)
             return updated_task
         except Exception as e:
             return f"Error: {str(e)}"

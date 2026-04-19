@@ -1,4 +1,5 @@
 """Background task execution system."""
+
 import subprocess
 import threading
 import uuid
@@ -39,11 +40,7 @@ class BackgroundManager:
                 timeout=300,
                 check=False,
             )
-            result = (
-                (r.stdout + r.stderr).strip()[:50000]
-                if (r.stdout or r.stderr)
-                else "(no output)"
-            )
+            result = (r.stdout + r.stderr).strip()[:50000] if (r.stdout or r.stderr) else "(no output)"
             status = "success" if r.returncode == 0 else f"error (code {r.returncode})"
         except subprocess.TimeoutExpired:
             result = "Error: Timeout (300s)"
@@ -71,9 +68,7 @@ class BackgroundManager:
             task = self._tasks.get(task_id, None)
             if not task:
                 return f"Task {task_id} not found"
-            return (
-                f"Task: {task_id}, command: {task['command']}, status: {task['status']}"
-            )
+            return f"Task: {task_id}, command: {task['command']}, status: {task['status']}"
         else:
             lines = []
             for id, task in self._tasks.items():

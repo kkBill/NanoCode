@@ -26,7 +26,8 @@ class ToolCall(BaseModel):
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "id": self.id,            "type": self.type,
+            "id": self.id,
+            "type": self.type,
             "function": self.function.to_dict(),
         }
 

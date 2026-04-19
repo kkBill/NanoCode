@@ -1,4 +1,5 @@
 """Memory management system."""
+
 import logging
 import re
 from pathlib import Path
@@ -69,9 +70,7 @@ class MemoryManager:
 
         # Group memories by type
         for mem_type in self.types:
-            type_memories = [
-                (name, data) for name, data in self.memories.items() if data["type"] == mem_type
-            ]
+            type_memories = [(name, data) for name, data in self.memories.items() if data["type"] == mem_type]
             if not type_memories:
                 continue
 

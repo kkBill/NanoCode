@@ -1,11 +1,12 @@
-from dataclasses import dataclass
-from pathlib import Path
-import uuid
+import json
 import queue
 import threading
-import json
 import time
+import uuid
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+
 from croniter import croniter
 
 from ..utils import NANOCODE_HOME
@@ -39,6 +40,7 @@ CronTask 还可以增加一个字段 last_triggered_at 来记录上次触发时�
 
 """
 
+
 @dataclass
 class CronTask:
     id: str
@@ -48,6 +50,7 @@ class CronTask:
     prompt: str  # the function to execute when the task is triggered
     created_at: str
     last_triggered_at: str | None = None
+
 
 class CronScheduler:
     def __init__(self):
@@ -124,7 +127,7 @@ class CronScheduler:
 
     def list_tasks(self) -> list[CronTask]:
         return list(self.tasks.values())
-    
+
     def _load_tasks(self):
         """Load durable tasks from disk."""
         path = self.scheduled_tasks_file

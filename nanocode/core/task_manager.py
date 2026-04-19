@@ -1,4 +1,5 @@
 """Graph-based task management system."""
+
 import json
 from pathlib import Path
 
@@ -54,9 +55,7 @@ class TaskManager:
                         raise ValueError(f"Prerequisite task {prereq_id} not found")
                     prereq_task = json.loads(prereq_path.read_text(encoding="utf-8"))
                     if prereq_task["status"] != "completed":
-                        raise ValueError(
-                            f"Cannot complete task {task_id} because prerequisite task {prereq_id} is not completed"
-                        )
+                        raise ValueError(f"Cannot complete task {task_id} because prerequisite task {prereq_id} is not completed")
 
                 # If completed, clear all blocks-task by this task
                 self._clear_blocks(task_id)
@@ -72,12 +71,8 @@ class TaskManager:
                 blocked_path = self.dir / f"task_{block_id}.json"
                 if blocked_path.exists():
                     blocked_task = json.loads(blocked_path.read_text(encoding="utf-8"))
-                    blocked_task["blockedBy"] = list(
-                        set(blocked_task["blockedBy"] + [task_id])
-                    )
-                    blocked_path.write_text(
-                        json.dumps(blocked_task, indent=2), encoding="utf-8"
-                    )
+                    blocked_task["blockedBy"] = list(set(blocked_task["blockedBy"] + [task_id]))
+                    blocked_path.write_text(json.dumps(blocked_task, indent=2), encoding="utf-8")
 
         # Save updated task
         path.write_text(json.dumps(task, indent=2), encoding="utf-8")
@@ -108,12 +103,8 @@ class TaskManager:
             blocked_path = self.dir / f"task_{blocked_id}.json"
             if blocked_path.exists():
                 blocked_task = json.loads(blocked_path.read_text(encoding="utf-8"))
-                blocked_task["blockedBy"] = [
-                    id for id in blocked_task["blockedBy"] if id != task_id
-                ]
-                blocked_path.write_text(
-                    json.dumps(blocked_task, indent=2), encoding="utf-8"
-                )
+                blocked_task["blockedBy"] = [id for id in blocked_task["blockedBy"] if id != task_id]
+                blocked_path.write_text(json.dumps(blocked_task, indent=2), encoding="utf-8")
 
     def _max_id(self) -> int:
         """Get the maximum task id."""

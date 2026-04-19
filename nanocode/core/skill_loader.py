@@ -1,4 +1,5 @@
 import re
+
 import yaml
 
 from ..utils import SKILLS_DIR
@@ -53,7 +54,7 @@ class SkillLoader:
     def list_skills(self) -> str:
         """List all available skills."""
         lines = ["<Available Skills>"]
-        
+
         for item in self.skill_dir.iterdir():
             if not item.is_dir():
                 continue

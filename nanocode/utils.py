@@ -20,6 +20,7 @@ WORK_DIR.mkdir(exist_ok=True)
 def debug_print_messages(messages: list):
     """Print messages for debugging purposes."""
     from .message import Message
+
     data = [msg.model_dump() if isinstance(msg, Message) else msg for msg in messages]
     output = json.dumps(data, indent=2, ensure_ascii=False)
     logger.debug("Messages:\n%s\n%s\n%s", "-" * 40, output, "-" * 40)

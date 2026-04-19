@@ -1,4 +1,5 @@
 """Skill loading tool."""
+
 import logging
 
 from .base import Tool

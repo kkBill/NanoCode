@@ -1,11 +1,13 @@
 import logging
 import os
+
 from dotenv import load_dotenv
 
 from ..llm import OpenAIClient
-from ..message import Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage
+from ..message import AssistantMessage, Message, SystemMessage, ToolMessage, UserMessage
 
 logger = logging.getLogger(__name__)
+
 
 class ContextManager:
     """Manage context window and message compaction."""
@@ -48,9 +50,7 @@ class ContextManager:
         logger.info("Token count exceeds threshold, compacting messages...")
         # Keep recent rounds, summarize older messages
         old_messages = messages[: -(self.keep_recent_rounds * 2)]
-        context = "\n".join(
-            [f"{msg.role}: {msg.content}" for msg in old_messages]
-        )
+        context = "\n".join([f"{msg.role}: {msg.content}" for msg in old_messages])
         summary_prompt = (
             "Summarize the following conversation for continuity. Keeping important details, include:\n"
             "(1) Current state: what has been done, what is the current situation\n"

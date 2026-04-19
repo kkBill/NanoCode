@@ -1,13 +1,15 @@
 """Sub-agent spawning tool."""
+
 import json
 import logging
 import os
+
 from dotenv import load_dotenv
 
+from ..llm import OpenAIClient
+from ..message import AssistantMessage, Message, SystemMessage, ToolCall, ToolCallFunction, ToolMessage, UserMessage
 from ..utils import WORK_DIR
 from .base import Tool
-from ..llm import OpenAIClient
-from ..message import Message, SystemMessage, UserMessage, AssistantMessage, ToolMessage, ToolCall, ToolCallFunction
 
 logger = logging.getLogger(__name__)
 
@@ -119,8 +121,4 @@ class SubAgent(Tool):
                 break
 
         # Only return the final response
-        return (
-            response.choices[0].message.content.strip()
-            if response.choices[0].message.content
-            else "Sub-agent finished without response."
-        )
+        return response.choices[0].message.content.strip() if response.choices[0].message.content else "Sub-agent finished without response."

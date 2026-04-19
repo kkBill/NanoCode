@@ -2,8 +2,7 @@ import logging
 from pathlib import Path
 
 from .agent import agent_loop
-from .core import system_prompt_builder
-from .core import cron_scheduler
+from .core import cron_scheduler, system_prompt_builder
 from .message import Message, SystemMessage, UserMessage
 
 # Configure logging once at startup
@@ -19,6 +18,7 @@ logging.basicConfig(
         logging.FileHandler(log_dir / "nanocode.log", encoding="utf-8"),
     ],
 )
+
 
 def main():
     """Main entry point for the agent."""
