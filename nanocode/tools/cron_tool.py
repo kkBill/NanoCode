@@ -1,6 +1,6 @@
 import logging
 
-from .base import Tool
+from .base import Tool, ToolParams
 
 logger = logging.getLogger(__name__)
 
@@ -12,27 +12,14 @@ class CreateCron(Tool):
     def description(self) -> str:
         return "Create a cron task with a cron expression, trigger mode, persistent mode, and prompt."
 
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "cron_expr": {
-                            "type": "string",
-                            "description": "Cron expression to specify the schedule of the task",
-                        },
-                        "trigger_mode": {"type": "string", "enum": ["repeat", "one-shot"]},
-                        "persistent_mode": {"type": "string", "enum": ["durable", "in-memory"]},
-                        "prompt": {"type": "string", "description": "The prompt to execute when the task is triggered"},
-                    },
-                    "required": ["cron_expr", "trigger_mode", "persistent_mode", "prompt"],
-                },
-            },
-        }
+    PARAMS = (
+        ToolParams()
+        .param("cron_expr", str, description="Cron expression to specify the schedule of the task")
+        .param("trigger_mode", str, enum=["repeat", "one-shot"])
+        .param("persistent_mode", str, enum=["durable", "in-memory"])
+        .param("prompt", str, description="The prompt to execute when the task is triggered")
+        .required("cron_expr", "trigger_mode", "persistent_mode", "prompt")
+    )
 
     # 为什么这个execute方法不返回 str 也没有关系？它不是继承自 Tool 吗？
     # Python 中的继承、抽象类等机制是怎么样的？
@@ -65,21 +52,7 @@ class DeleteCron(Tool):
     def description(self) -> str:
         return "Delete a cron task by its ID."
 
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string", "description": "The ID of the cron task to delete"},
-                    },
-                    "required": ["task_id"],
-                },
-            },
-        }
+    PARAMS = ToolParams().param("task_id", str, description="The ID of the cron task to delete").required("task_id")
 
     def execute(self, **kwargs) -> str:
         from ..core import cron_scheduler

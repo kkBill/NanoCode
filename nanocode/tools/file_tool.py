@@ -3,13 +3,15 @@
 import logging
 
 from ..utils import WORK_DIR, safe_path
-from .base import Tool
+from .base import Tool, ToolParams
 
 logger = logging.getLogger(__name__)
 
 
 class ReadFile(Tool):
     """Read file contents."""
+
+    PARAMS = ToolParams().param("filename", str, description="Path to the file to read").required("filename")
 
     def name(self) -> str:
         return "read_file"
@@ -28,23 +30,16 @@ class ReadFile(Tool):
         except Exception as e:
             return f"Error: {str(e)}"
 
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"filename": {"type": "string"}},
-                    "required": ["filename"],
-                },
-            },
-        }
-
 
 class WriteFile(Tool):
     """Write content to files."""
+
+    PARAMS = (
+        ToolParams()
+        .param("filename", str, description="Path to the file to write")
+        .param("content", str, description="Content to write into the file")
+        .required("filename", "content")
+    )
 
     def name(self) -> str:
         return "write_file"
@@ -63,20 +58,3 @@ class WriteFile(Tool):
             return "File written successfully"
         except Exception as e:
             return f"Error: {str(e)}"
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "filename": {"type": "string"},
-                        "content": {"type": "string"},
-                    },
-                    "required": ["filename", "content"],
-                },
-            },
-        }

@@ -14,8 +14,6 @@ from .core import (
     context_manager,
     cron_scheduler,
     hook_manager,
-    memory_manager,
-    permission_manager,
 )
 from .llm import OpenAIClient
 from .message import (
@@ -46,7 +44,10 @@ def agent_loop(messages: list[Message]):
 
     while True:
         # Get all results from background tasks and append to messages
-        background_results = [f"Task {r['task_id']} finished with status {r['status']}. Command: {r['command']}. Result: {r['result']}" for r in background_manager.get_result()]
+        background_results = [
+            f"Task {r['task_id']} finished with status {r['status']}. Command: {r['command']}. Result: {r['result']}"
+            for r in background_manager.get_result()
+        ]
         results_content = "\n".join(background_results)
         if results_content:
             messages.append(UserMessage(content=results_content))
@@ -113,7 +114,11 @@ def agent_loop(messages: list[Message]):
                 # Append the truncated content back to messages and prompt for continuation
                 truncated_content = response.choices[0].message.content
                 messages.append(AssistantMessage(content=truncated_content))
-                messages.append(UserMessage(content="The previous response was cut off due to length. Please continue from where you left off."))
+                messages.append(
+                    UserMessage(
+                        content="The previous response was cut off due to length. Please continue from where you left off."
+                    )
+                )
         elif finish_reason == "stop":
             # Normal finish, return the content to user and end the loop
             logger.info("Final response: %s", response.choices[0].message.content)

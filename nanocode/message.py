@@ -35,17 +35,15 @@ class ToolCall(BaseModel):
 class Message(BaseModel):
     """Base class for all messages."""
 
+    # 遇到未知字段时忽略，而非报错
     model_config = ConfigDict(extra="ignore")
 
     role: str
     content: str
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to OpenAI SDK compatible dict.
-
-        Subclasses should override this to handle role-specific fields.
-        Custom fields (e.g., tool_name, reasoning_content) must be excluded.
-        """
+        """Subclasses should override this to handle role-specific fields."""
+        # 抽象方法的轻量实现，子类若不覆盖会在运行时抛出异常
         raise NotImplementedError
 
     @classmethod

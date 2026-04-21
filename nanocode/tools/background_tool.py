@@ -2,7 +2,7 @@
 
 import logging
 
-from .base import Tool
+from .base import Tool, ToolParams
 
 logger = logging.getLogger(__name__)
 
@@ -10,27 +10,15 @@ logger = logging.getLogger(__name__)
 class RunBackgroundTask(Tool):
     """Run a task in the background."""
 
+    PARAMS = (
+        ToolParams().param("command", str, description="Shell command to run in the background").required("command")
+    )
+
     def name(self) -> str:
         return "run_background_task"
 
     def description(self) -> str:
         return "Run a long-running task in the background. Return a task id immediately, and the result will be available later via check_background_task."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "command": {"type": "string"},
-                    },
-                    "required": ["command"],
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         from ..core import background_manager
@@ -48,26 +36,13 @@ class RunBackgroundTask(Tool):
 class CheckBackgroundTask(Tool):
     """Check background task status."""
 
+    PARAMS = ToolParams().param("task_id", str, description="ID of the background task to check")
+
     def name(self) -> str:
         return "check_background_task"
 
     def description(self) -> str:
         return "Check the status of a background task by id, or list all background tasks if no id provided."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "string"},
-                    },
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         from ..core import background_manager

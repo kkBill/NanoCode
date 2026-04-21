@@ -2,7 +2,7 @@
 
 import logging
 
-from .base import Tool
+from .base import Tool, ToolParams
 
 logger = logging.getLogger(__name__)
 
@@ -10,27 +10,13 @@ logger = logging.getLogger(__name__)
 class LoadSkill(Tool):
     """Load skill instructions by name."""
 
+    PARAMS = ToolParams().param("skill_name", str, description="Name of the skill to load").required("skill_name")
+
     def name(self) -> str:
         return "load_skill"
 
     def description(self) -> str:
         return "Load instructions for a skill by name. Use it when you need to use a skill but don't know how."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "skill_name": {"type": "string"},
-                    },
-                    "required": ["skill_name"],
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         from ..core import skill_loader

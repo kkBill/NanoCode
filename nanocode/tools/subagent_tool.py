@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from ..llm import OpenAIClient
 from ..message import AssistantMessage, Message, SystemMessage, ToolCall, ToolCallFunction, ToolMessage, UserMessage
 from ..utils import WORK_DIR
-from .base import Tool
+from .base import Tool, ToolParams
 
 logger = logging.getLogger(__name__)
 
@@ -17,27 +17,13 @@ logger = logging.getLogger(__name__)
 class SubAgent(Tool):
     """Spawn a sub-agent with fresh context."""
 
+    PARAMS = ToolParams().param("task", str, description="Task description for the sub-agent").required("task")
+
     def name(self) -> str:
         return "sub_agent"
 
     def description(self) -> str:
         return "Spawn a subagent with fresh context to solve a given task. It shares the filesystem but not conversation history."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "task": {"type": "string"},
-                    },
-                    "required": ["task"],
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         task = kwargs.get("task", "")
@@ -121,4 +107,8 @@ class SubAgent(Tool):
                 break
 
         # Only return the final response
-        return response.choices[0].message.content.strip() if response.choices[0].message.content else "Sub-agent finished without response."
+        return (
+            response.choices[0].message.content.strip()
+            if response.choices[0].message.content
+            else "Sub-agent finished without response."
+        )

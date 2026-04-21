@@ -1,7 +1,6 @@
 """Graph-based task management system."""
 
 import json
-from pathlib import Path
 
 from ..utils import NANOCODE_HOME
 
@@ -55,7 +54,9 @@ class TaskManager:
                         raise ValueError(f"Prerequisite task {prereq_id} not found")
                     prereq_task = json.loads(prereq_path.read_text(encoding="utf-8"))
                     if prereq_task["status"] != "completed":
-                        raise ValueError(f"Cannot complete task {task_id} because prerequisite task {prereq_id} is not completed")
+                        raise ValueError(
+                            f"Cannot complete task {task_id} because prerequisite task {prereq_id} is not completed"
+                        )
 
                 # If completed, clear all blocks-task by this task
                 self._clear_blocks(task_id)
@@ -114,6 +115,6 @@ class TaskManager:
                 id = int(path.stem.split("_")[1])
                 if id > max_id:
                     max_id = id
-            except:
+            except (ValueError, IndexError):
                 continue
         return max_id + 1

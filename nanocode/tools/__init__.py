@@ -1,14 +1,14 @@
 """Tool registry and exports."""
 
-from .background_tools import CheckBackgroundTask, RunBackgroundTask
-from .base import Tool
-from .bash import Bash
+from .background_tool import CheckBackgroundTask, RunBackgroundTask
+from .base import Tool, ToolParams
+from .bash_tool import Bash
 from .cron_tool import CreateCron, DeleteCron
-from .file import ReadFile, WriteFile
-from .memory_tools import ListMemories, SaveMemory
-from .skill import LoadSkill
-from .subagent import SubAgent
-from .task_tools import CreateTask, GetTask, ListTasks, UpdateTask
+from .file_tool import ReadFile, WriteFile
+from .memory_tool import ListMemories, SaveMemory
+from .skill_tool import LoadSkill
+from .subagent_tool import SubAgent
+from .task_tool import CreateTask, GetTask, ListTasks, UpdateTask
 
 
 class ToolRegistry:
@@ -65,6 +65,7 @@ registry.register(DeleteCron())
 
 __all__ = [
     "Tool",
+    "ToolParams",
     "ToolRegistry",
     "registry",
     "Bash",

@@ -2,7 +2,6 @@
 
 import datetime
 import os
-from pathlib import Path
 
 from ..tools.base import Tool
 from ..utils import WORK_DIR

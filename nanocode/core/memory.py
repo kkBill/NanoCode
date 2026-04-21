@@ -2,7 +2,6 @@
 
 import logging
 import re
-from pathlib import Path
 
 import yaml
 
@@ -97,7 +96,9 @@ class MemoryManager:
 
         # Check for duplicate
         if name in self.memories:
-            logger.warning("Memory with name '%s' already exists. Use a different name or update existing memory.", name)
+            logger.warning(
+                "Memory with name '%s' already exists. Use a different name or update existing memory.", name
+            )
             return False
 
         # Create markdown file with frontmatter

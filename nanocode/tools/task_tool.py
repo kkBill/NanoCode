@@ -2,7 +2,7 @@
 
 import logging
 
-from .base import Tool
+from .base import Tool, ToolParams
 
 logger = logging.getLogger(__name__)
 
@@ -10,27 +10,13 @@ logger = logging.getLogger(__name__)
 class CreateTask(Tool):
     """Create a new task."""
 
+    PARAMS = ToolParams().param("description", str, description="Task description").required("description")
+
     def name(self) -> str:
         return "create_task"
 
     def description(self) -> str:
         return "Create a new task with description. Return the created task with id."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "description": {"type": "string"},
-                    },
-                    "required": ["description"],
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         from ..core import task_manager
@@ -48,41 +34,20 @@ class CreateTask(Tool):
 class UpdateTask(Tool):
     """Update a task's status and dependencies."""
 
+    PARAMS = (
+        ToolParams()
+        .param("task_id", int, description="Task ID")
+        .param("status", str, enum=["pending", "in_progress", "completed"], description="New status")
+        .param("add_blocked_by", list, items=int, description="List of task ids that block this task")
+        .param("add_blocks", list, items=int, description="List of task ids that this task blocks")
+        .required("task_id", "status")
+    )
+
     def name(self) -> str:
         return "update_task"
 
     def description(self) -> str:
         return "Update a task's status and dependencies. Return the updated task."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "integer"},
-                        "status": {
-                            "type": "string",
-                            "enum": ["pending", "in_progress", "completed"],
-                        },
-                        "add_blocked_by": {
-                            "type": "array",
-                            "items": {"type": "integer"},
-                            "description": "List of task ids that block this task.",
-                        },
-                        "add_blocks": {
-                            "type": "array",
-                            "items": {"type": "integer"},
-                            "description": "List of task ids that this task blocks.",
-                        },
-                    },
-                    "required": ["task_id", "status"],
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         from ..core import task_manager
@@ -112,27 +77,13 @@ class UpdateTask(Tool):
 class GetTask(Tool):
     """Get a task by id."""
 
+    PARAMS = ToolParams().param("task_id", int, description="Task ID").required("task_id")
+
     def name(self) -> str:
         return "get_task"
 
     def description(self) -> str:
         return "Get a task's details by id."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "task_id": {"type": "integer"},
-                    },
-                    "required": ["task_id"],
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         from ..core import task_manager
@@ -153,24 +104,13 @@ class GetTask(Tool):
 class ListTasks(Tool):
     """List all tasks."""
 
+    # No parameters
+
     def name(self) -> str:
         return "list_tasks"
 
     def description(self) -> str:
         return "List all tasks with their details."
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {},
-                },
-            },
-        }
 
     def execute(self, **kwargs) -> str:
         from ..core import task_manager

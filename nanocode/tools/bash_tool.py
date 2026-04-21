@@ -4,13 +4,15 @@ import logging
 import os
 import subprocess
 
-from .base import Tool
+from .base import Tool, ToolParams
 
 logger = logging.getLogger(__name__)
 
 
 class Bash(Tool):
     """Run shell commands."""
+
+    PARAMS = ToolParams().param("command", str, description="Shell command to execute").required("command")
 
     def name(self) -> str:
         return "bash"
@@ -40,17 +42,3 @@ class Bash(Tool):
             return out[:50000] if out else "(no output)"
         except subprocess.TimeoutExpired:
             return "Error: Timeout (120s)"
-
-    def schema(self) -> dict:
-        return {
-            "type": "function",
-            "function": {
-                "name": self.name(),
-                "description": self.description(),
-                "parameters": {
-                    "type": "object",
-                    "properties": {"command": {"type": "string"}},
-                    "required": ["command"],
-                },
-            },
-        }
